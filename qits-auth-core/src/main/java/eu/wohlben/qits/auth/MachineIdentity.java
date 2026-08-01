@@ -52,11 +52,22 @@ public final class MachineIdentity {
   }
 
   /**
-   * True when the claim is present and equal to {@code expected}. An absent claim is a mismatch: a
+   * True when the claim is present and covers {@code expected}. An absent claim is a mismatch: a
    * token that was never granted a {@code project} may not act on one.
+   *
+   * <p>A claim value of {@link QitsClaims#ANY} covers every value. That is how a service that acts
+   * across all of them holds its claim — qits-artifacts hosts every project's git repositories, so
+   * its token says {@code project=*} rather than naming one. The wildcard is read on the token side
+   * only: a caller passing {@code "*"} as {@code expected} is asking about a target named {@code
+   * "*"} and gets the same equality answer as for any other name.
    */
   public static boolean claimMatches(SecurityIdentity identity, String name, String expected) {
-    return expected != null && claim(identity, name).filter(expected::equals).isPresent();
+    if (expected == null) {
+      return false;
+    }
+    return claim(identity, name)
+        .filter(value -> QitsClaims.ANY.equals(value) || value.equals(expected))
+        .isPresent();
   }
 
   /** Shorthand for the common check: right audience and right {@code project}. */

@@ -64,6 +64,22 @@ class MachineAuthTest {
   }
 
   @Test
+  void gateOnAcceptsAWildcardTokenForAnyTarget() {
+    // How the git-host holds its grant: one client acting for every project.
+    MachineAuth auth =
+        gateOn(
+            TestTokens.machine(QitsClaims.ARTIFACTS, QitsClaims.CI)
+                .claim(QitsClaims.PROJECT, QitsClaims.ANY)
+                .build());
+
+    assertDoesNotThrow(() -> auth.requireProject("qits"));
+    assertDoesNotThrow(() -> auth.requireProject("some-other-project"));
+    assertTrue(auth.permits(QitsClaims.PROJECT, "qits"));
+    // One wildcard claim does not grant the others.
+    assertThrows(ForbiddenException.class, () -> auth.requireWorkspace("ws-1"));
+  }
+
+  @Test
   void gateOnRejectsAnUngrantedClaim() {
     MachineAuth auth = gateOn(TestTokens.machine(QitsClaims.CI, QitsClaims.CI).build());
 

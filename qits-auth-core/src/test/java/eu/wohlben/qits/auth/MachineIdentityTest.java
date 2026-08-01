@@ -56,6 +56,32 @@ class MachineIdentityTest {
   }
 
   @Test
+  void aWildcardClaimCoversEveryValue() {
+    SecurityIdentity everyProject =
+        TestTokens.machine(QitsClaims.ARTIFACTS, QitsClaims.CI)
+            .claim(QitsClaims.PROJECT, QitsClaims.ANY)
+            .build();
+
+    assertTrue(MachineIdentity.claimMatches(everyProject, QitsClaims.PROJECT, "qits"));
+    assertTrue(MachineIdentity.claimMatches(everyProject, QitsClaims.PROJECT, "anything-else"));
+    assertTrue(MachineIdentity.matchesProject(everyProject, QitsClaims.CI, "qits"));
+    // The wildcard is on the claim it was granted for, not on the others.
+    assertFalse(MachineIdentity.claimMatches(everyProject, QitsClaims.WORKSPACE, "ws-1"));
+    // Still the wrong service.
+    assertFalse(MachineIdentity.matchesProject(everyProject, QitsClaims.CD, "qits"));
+  }
+
+  @Test
+  void askingAboutAStarIsAnOrdinaryQuestion() {
+    // The caller names its target; a token for one project does not cover "every project" just
+    // because the target spells the wildcard.
+    SecurityIdentity oneProject =
+        TestTokens.machine(QitsClaims.CI, QitsClaims.CI).claim(QitsClaims.PROJECT, "qits").build();
+
+    assertFalse(MachineIdentity.claimMatches(oneProject, QitsClaims.PROJECT, QitsClaims.ANY));
+  }
+
+  @Test
   void theShorthandsWantBothTheAudienceAndTheClaim() {
     SecurityIdentity identity =
         TestTokens.machine(QitsClaims.WORKSPACES, QitsClaims.ARTIFACTS)

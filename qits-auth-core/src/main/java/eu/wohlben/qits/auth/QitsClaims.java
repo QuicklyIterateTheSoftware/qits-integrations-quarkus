@@ -29,6 +29,16 @@ public final class QitsClaims {
   /** Every structured claim qits-idp can grant. */
   public static final Set<String> NAMES = Set.of(PROJECT, WORKSPACE, BRANCH);
 
+  /**
+   * The claim value that covers every value. A client granted {@code project=*} may act on any
+   * project — the platform services that serve all of them, such as qits-artifacts hosting every
+   * project's git repositories, hold their claims this way.
+   *
+   * <p>It is a token-side value only. Asking whether a token covers the literal target {@code "*"}
+   * is answered like any other name, so a caller cannot widen its own check by passing it.
+   */
+  public static final String ANY = "*";
+
   /** Service id of qits-ci. */
   public static final String CI = "qits-ci";
 

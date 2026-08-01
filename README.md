@@ -40,7 +40,7 @@ the vocabulary, the claim checks and the gate.
 | --- | --- |
 | `ForwardAuthMechanism` | Reads `X-Qits-User` into a `SecurityIdentity`; no header is anonymous, not a denial. |
 | `ForwardAuthIdentityProvider` | Completes that request into an identity whose principal is the username. No roles. |
-| `QitsClaims` | The claim names (`project`, `workspace`, `branch`) and the service ids that double as `aud` and client id. |
+| `QitsClaims` | The claim names (`project`, `workspace`, `branch`), the service ids that double as `aud` and client id, and the `*` that covers every value. |
 | `MachineIdentity` | Static, CDI-free reads of a validated token off a `SecurityIdentity`. |
 | `MachineAuth` | The `require*` guards, and the rollout gate they sit behind. |
 
@@ -193,6 +193,20 @@ public Response postReceive(@Valid PostReceiveEvent event) {
 An absent claim is a mismatch: a token never granted a `project` may not act on
 one.
 
+### The wildcard
+
+A claim value of `*` (`QitsClaims.ANY`) covers every value. A client granted
+`project=*` passes `requireProject(anything)`.
+
+That is how a service acting across all of something holds its claim rather than
+being granted a list that grows: qits-artifacts hosts every project's git
+repositories, so its token says `project=*`.
+
+The wildcard is read on the token side only. Passing `"*"` as the *target* asks
+about a thing named `*` and gets the ordinary equality answer, so no call site
+can widen its own check with it. And a wildcard on one claim grants nothing on
+another — `project=*` still fails `requireWorkspace(...)`.
+
 A failure throws `UnauthorizedException` (401) when no machine token was
 presented, `ForbiddenException` (403) when one was but it does not cover the
 target. Quarkus REST maps both — no exception mapper needed.
@@ -201,7 +215,7 @@ Reach for `MachineIdentity`'s static methods when the decision is more than an
 equality check; they take the identity explicitly and need no CDI.
 
 Spell claim names and service ids from `QitsClaims` (`PROJECT`, `WORKSPACE`,
-`BRANCH`; `CI`, `CD`, `ARTIFACTS`, `WORKSPACES`, `GATEWAY`). A mistyped claim
+`BRANCH`; `CI`, `CD`, `ARTIFACTS`, `WORKSPACES`, `GATEWAY`; `ANY`). A mistyped claim
 name reads as "claim absent", which is a silent pass on an unenforced path.
 
 ### The gate
