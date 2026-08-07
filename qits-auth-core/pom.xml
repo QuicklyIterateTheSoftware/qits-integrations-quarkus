@@ -16,7 +16,7 @@
     <parent>
         <groupId>eu.wohlben.qits</groupId>
         <artifactId>qits-integrations-quarkus</artifactId>
-        <version>2026.802.154953</version>
+        <version>2026.807.165756</version>
     </parent>
 
     <artifactId>qits-auth-core</artifactId>
