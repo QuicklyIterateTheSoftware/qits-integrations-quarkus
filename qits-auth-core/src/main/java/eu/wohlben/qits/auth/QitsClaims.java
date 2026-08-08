@@ -14,6 +14,11 @@ import java.util.Set;
  *
  * <p>Claims appear on a token only when granted to the client, so absence is normal and never an
  * error by itself.
+ *
+ * <p><b>Only platform service ids are constants.</b> An environment service is named
+ * {@code <env>-qits-<app>} — {@code prod-qits-ci} — and the environment is not known until deploy
+ * time, so a service reads its own id and its peers' ids from injected config. Anything named here
+ * would be true in one environment and wrong in every other.
  */
 public final class QitsClaims {
 
@@ -31,35 +36,35 @@ public final class QitsClaims {
 
   /**
    * The claim value that covers every value. A client granted {@code project=*} may act on any
-   * project — the platform services that serve all of them, such as qits-artifacts hosting every
-   * project's git repositories, hold their claims this way.
+   * project — the platform services that serve all of them, such as qits-platform-artifacts
+   * hosting every project's git repositories, hold their claims this way.
    *
    * <p>It is a token-side value only. Asking whether a token covers the literal target {@code "*"}
    * is answered like any other name, so a caller cannot widen its own check by passing it.
    */
   public static final String ANY = "*";
 
-  /** Service id of qits-ci. */
-  public static final String CI = "qits-ci";
-
-  /** Service id of qits-cd. */
-  public static final String CD = "qits-cd";
-
-  /** Service id of qits-artifacts. */
-  public static final String ARTIFACTS = "qits-artifacts";
-
-  /** Service id of qits-workspaces. */
-  public static final String WORKSPACES = "qits-workspaces";
-
-  /** Service id of qits-gateway. */
-  public static final String GATEWAY = "qits-gateway";
+  /**
+   * Service id of qits-platform-artifacts, the only platform service qits-idp seeds a static client
+   * for today.
+   *
+   * <p>The other platform services are deliberately absent. qits-platform-idp issues tokens rather
+   * than asking for them, and qits-platform-docs and qits-platform-edge have no seeded client — add
+   * a constant here when one appears on {@code qits.idp.clients}, not before.
+   */
+  public static final String ARTIFACTS = "qits-platform-artifacts";
 
   /**
-   * Every static client qits-idp seeds. A service id is the client id when the service asks for a
-   * token and the {@code aud} value when it receives one — one name for both ends, so a grant reads
-   * the same from either side.
+   * The static platform client ids. A service id is the client id when the service asks for a token
+   * and the {@code aud} value when it receives one — one name for both ends, so a grant reads the
+   * same from either side.
+   *
+   * <p><b>Platform services only.</b> An environment service is deployed once per environment and
+   * its id carries that environment: {@code <env>-qits-<app>}, such as {@code prod-qits-ci}. The
+   * environment is known at deploy time, not at compile time, so those ids reach a service through
+   * injected config and cannot be constants here.
    */
-  public static final Set<String> SERVICE_IDS = Set.of(CI, CD, ARTIFACTS, WORKSPACES, GATEWAY);
+  public static final Set<String> SERVICE_IDS = Set.of(ARTIFACTS);
 
   private QitsClaims() {}
 }

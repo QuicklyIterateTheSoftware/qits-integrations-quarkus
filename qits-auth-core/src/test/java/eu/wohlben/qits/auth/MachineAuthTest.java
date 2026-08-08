@@ -16,15 +16,19 @@ import org.junit.jupiter.api.Test;
  */
 class MachineAuthTest {
 
+  // Env service ids carry their environment, so they are spelled here rather than in QitsClaims.
+  private static final String CI = "prod-qits-ci";
+  private static final String WORKSPACES = "prod-qits-workspaces";
+
   private static final SecurityIdentity CI_TOKEN_FOR_QITS =
-      TestTokens.machine(QitsClaims.CI, QitsClaims.CI).claim(QitsClaims.PROJECT, "qits").build();
+      TestTokens.machine(CI, CI).claim(QitsClaims.PROJECT, "qits").build();
 
   private static MachineAuth gateOff(SecurityIdentity identity) {
-    return new MachineAuth(false, QitsClaims.CI, identity);
+    return new MachineAuth(false, CI, identity);
   }
 
   private static MachineAuth gateOn(SecurityIdentity identity) {
-    return new MachineAuth(true, QitsClaims.CI, identity);
+    return new MachineAuth(true, CI, identity);
   }
 
   @Test
@@ -68,7 +72,7 @@ class MachineAuthTest {
     // How the git-host holds its grant: one client acting for every project.
     MachineAuth auth =
         gateOn(
-            TestTokens.machine(QitsClaims.ARTIFACTS, QitsClaims.CI)
+            TestTokens.machine(QitsClaims.ARTIFACTS, CI)
                 .claim(QitsClaims.PROJECT, QitsClaims.ANY)
                 .build());
 
@@ -81,7 +85,7 @@ class MachineAuthTest {
 
   @Test
   void gateOnRejectsAnUngrantedClaim() {
-    MachineAuth auth = gateOn(TestTokens.machine(QitsClaims.CI, QitsClaims.CI).build());
+    MachineAuth auth = gateOn(TestTokens.machine(CI, CI).build());
 
     assertThrows(ForbiddenException.class, () -> auth.requireProject("qits"));
   }
@@ -90,7 +94,7 @@ class MachineAuthTest {
   void gateOnRejectsATokenMeantForAnotherService() {
     MachineAuth auth =
         gateOn(
-            TestTokens.machine(QitsClaims.CD, QitsClaims.ARTIFACTS)
+            TestTokens.machine(WORKSPACES, QitsClaims.ARTIFACTS)
                 .claim(QitsClaims.PROJECT, "qits")
                 .build());
 

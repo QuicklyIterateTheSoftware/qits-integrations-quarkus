@@ -11,9 +11,13 @@ import org.junit.jupiter.api.Test;
 /** Reading a machine token off an identity: what is there, what is not, and what that means. */
 class MachineIdentityTest {
 
+  // Env service ids carry their environment, so they are spelled here rather than in QitsClaims.
+  private static final String CI = "prod-qits-ci";
+  private static final String WORKSPACES = "prod-qits-workspaces";
+
   @Test
   void aJwtPrincipalIsAMachineAndAnythingElseIsNot() {
-    assertTrue(MachineIdentity.isMachine(TestTokens.machine(QitsClaims.CI).build()));
+    assertTrue(MachineIdentity.isMachine(TestTokens.machine(CI).build()));
     assertFalse(MachineIdentity.isMachine(TestTokens.user("alice")));
     assertFalse(MachineIdentity.isMachine(TestTokens.anonymous()));
     assertFalse(MachineIdentity.isMachine(null));
@@ -21,17 +25,17 @@ class MachineIdentityTest {
 
   @Test
   void theAudienceIsTheServiceTheTokenIsFor() {
-    SecurityIdentity identity = TestTokens.machine(QitsClaims.CI, QitsClaims.CD).build();
+    SecurityIdentity identity = TestTokens.machine(CI, WORKSPACES).build();
 
-    assertTrue(MachineIdentity.hasAudience(identity, QitsClaims.CD));
+    assertTrue(MachineIdentity.hasAudience(identity, WORKSPACES));
     assertFalse(MachineIdentity.hasAudience(identity, QitsClaims.ARTIFACTS));
-    assertFalse(MachineIdentity.hasAudience(TestTokens.user("alice"), QitsClaims.CD));
+    assertFalse(MachineIdentity.hasAudience(TestTokens.user("alice"), WORKSPACES));
   }
 
   @Test
   void aGrantedClaimReadsBackAndAnUngrantedOneIsEmpty() {
     SecurityIdentity identity =
-        TestTokens.machine(QitsClaims.CI, QitsClaims.CI).claim(QitsClaims.PROJECT, "qits").build();
+        TestTokens.machine(CI, CI).claim(QitsClaims.PROJECT, "qits").build();
 
     assertEquals(Optional.of("qits"), MachineIdentity.claim(identity, QitsClaims.PROJECT));
     assertEquals(Optional.empty(), MachineIdentity.claim(identity, QitsClaims.WORKSPACE));
@@ -40,7 +44,7 @@ class MachineIdentityTest {
 
   @Test
   void anAbsentClaimIsAMismatchNotAWildcard() {
-    SecurityIdentity noClaims = TestTokens.machine(QitsClaims.CI, QitsClaims.CI).build();
+    SecurityIdentity noClaims = TestTokens.machine(CI, CI).build();
 
     assertFalse(MachineIdentity.claimMatches(noClaims, QitsClaims.PROJECT, "qits"));
   }
@@ -48,7 +52,7 @@ class MachineIdentityTest {
   @Test
   void aClaimMatchIsExact() {
     SecurityIdentity identity =
-        TestTokens.machine(QitsClaims.CI, QitsClaims.CI).claim(QitsClaims.PROJECT, "qits").build();
+        TestTokens.machine(CI, CI).claim(QitsClaims.PROJECT, "qits").build();
 
     assertTrue(MachineIdentity.claimMatches(identity, QitsClaims.PROJECT, "qits"));
     assertFalse(MachineIdentity.claimMatches(identity, QitsClaims.PROJECT, "qits-other"));
@@ -58,17 +62,17 @@ class MachineIdentityTest {
   @Test
   void aWildcardClaimCoversEveryValue() {
     SecurityIdentity everyProject =
-        TestTokens.machine(QitsClaims.ARTIFACTS, QitsClaims.CI)
+        TestTokens.machine(QitsClaims.ARTIFACTS, CI)
             .claim(QitsClaims.PROJECT, QitsClaims.ANY)
             .build();
 
     assertTrue(MachineIdentity.claimMatches(everyProject, QitsClaims.PROJECT, "qits"));
     assertTrue(MachineIdentity.claimMatches(everyProject, QitsClaims.PROJECT, "anything-else"));
-    assertTrue(MachineIdentity.matchesProject(everyProject, QitsClaims.CI, "qits"));
+    assertTrue(MachineIdentity.matchesProject(everyProject, CI, "qits"));
     // The wildcard is on the claim it was granted for, not on the others.
     assertFalse(MachineIdentity.claimMatches(everyProject, QitsClaims.WORKSPACE, "ws-1"));
     // Still the wrong service.
-    assertFalse(MachineIdentity.matchesProject(everyProject, QitsClaims.CD, "qits"));
+    assertFalse(MachineIdentity.matchesProject(everyProject, WORKSPACES, "qits"));
   }
 
   @Test
@@ -76,7 +80,7 @@ class MachineIdentityTest {
     // The caller names its target; a token for one project does not cover "every project" just
     // because the target spells the wildcard.
     SecurityIdentity oneProject =
-        TestTokens.machine(QitsClaims.CI, QitsClaims.CI).claim(QitsClaims.PROJECT, "qits").build();
+        TestTokens.machine(CI, CI).claim(QitsClaims.PROJECT, "qits").build();
 
     assertFalse(MachineIdentity.claimMatches(oneProject, QitsClaims.PROJECT, QitsClaims.ANY));
   }
@@ -84,7 +88,7 @@ class MachineIdentityTest {
   @Test
   void theShorthandsWantBothTheAudienceAndTheClaim() {
     SecurityIdentity identity =
-        TestTokens.machine(QitsClaims.WORKSPACES, QitsClaims.ARTIFACTS)
+        TestTokens.machine(WORKSPACES, QitsClaims.ARTIFACTS)
             .claim(QitsClaims.WORKSPACE, "ws-1")
             .claim(QitsClaims.BRANCH, "feature/x")
             .build();
@@ -92,7 +96,7 @@ class MachineIdentityTest {
     assertTrue(MachineIdentity.matchesWorkspace(identity, QitsClaims.ARTIFACTS, "ws-1"));
     assertTrue(MachineIdentity.matchesBranch(identity, QitsClaims.ARTIFACTS, "feature/x"));
     // Right claim, wrong service: a token minted for artifacts says nothing to qits-ci.
-    assertFalse(MachineIdentity.matchesWorkspace(identity, QitsClaims.CI, "ws-1"));
+    assertFalse(MachineIdentity.matchesWorkspace(identity, CI, "ws-1"));
     assertFalse(MachineIdentity.matchesProject(identity, QitsClaims.ARTIFACTS, "ws-1"));
   }
 }
