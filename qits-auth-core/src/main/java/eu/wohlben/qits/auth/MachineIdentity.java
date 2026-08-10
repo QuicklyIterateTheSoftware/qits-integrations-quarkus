@@ -34,7 +34,10 @@ public final class MachineIdentity {
     return jwt.getAudience();
   }
 
-  /** True when the token is addressed to {@code audience} — one of {@link QitsClaims#SERVICE_IDS}. */
+  /**
+   * True when the token is addressed to {@code audience} — a service id, which the caller reads
+   * from config because every service id carries an environment.
+   */
   public static boolean hasAudience(SecurityIdentity identity, String audience) {
     return audiences(identity).contains(audience);
   }

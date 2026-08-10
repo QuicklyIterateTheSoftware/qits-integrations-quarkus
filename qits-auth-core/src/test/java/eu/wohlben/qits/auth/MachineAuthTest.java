@@ -16,8 +16,9 @@ import org.junit.jupiter.api.Test;
  */
 class MachineAuthTest {
 
-  // Env service ids carry their environment, so they are spelled here rather than in QitsClaims.
+  // Service ids carry their environment, so they are spelled here rather than in QitsClaims.
   private static final String CI = "prod-qits-ci";
+  private static final String ARTIFACTS = "prod-qits-artifacts";
   private static final String WORKSPACES = "prod-qits-workspaces";
 
   private static final SecurityIdentity CI_TOKEN_FOR_QITS =
@@ -37,7 +38,7 @@ class MachineAuthTest {
         new SecurityIdentity[] {
           TestTokens.anonymous(),
           TestTokens.user("alice"),
-          TestTokens.machine("someone-else", QitsClaims.ARTIFACTS).build()
+          TestTokens.machine("someone-else", ARTIFACTS).build()
         }) {
       MachineAuth auth = gateOff(identity);
       assertFalse(auth.enforced());
@@ -72,7 +73,7 @@ class MachineAuthTest {
     // How the git-host holds its grant: one client acting for every project.
     MachineAuth auth =
         gateOn(
-            TestTokens.machine(QitsClaims.ARTIFACTS, CI)
+            TestTokens.machine(ARTIFACTS, CI)
                 .claim(QitsClaims.PROJECT, QitsClaims.ANY)
                 .build());
 
@@ -94,7 +95,7 @@ class MachineAuthTest {
   void gateOnRejectsATokenMeantForAnotherService() {
     MachineAuth auth =
         gateOn(
-            TestTokens.machine(WORKSPACES, QitsClaims.ARTIFACTS)
+            TestTokens.machine(WORKSPACES, ARTIFACTS)
                 .claim(QitsClaims.PROJECT, "qits")
                 .build());
 
