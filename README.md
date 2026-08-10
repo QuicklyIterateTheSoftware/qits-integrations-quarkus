@@ -40,7 +40,7 @@ the vocabulary, the claim checks and the gate.
 | --- | --- |
 | `ForwardAuthMechanism` | Reads `X-Qits-User` into a `SecurityIdentity`; no header is anonymous, not a denial. |
 | `ForwardAuthIdentityProvider` | Completes that request into an identity whose principal is the username. No roles. |
-| `QitsClaims` | The claim names (`project`, `workspace`, `branch`), the service ids that double as `aud` and client id, and the `*` that covers every value. |
+| `QitsClaims` | The claim names (`project`, `workspace`, `branch`) and the `*` that covers every value. Service ids are config, never constants. |
 | `MachineIdentity` | Static, CDI-free reads of a validated token off a `SecurityIdentity`. |
 | `MachineAuth` | The `require*` guards, and the rollout gate they sit behind. |
 
@@ -199,7 +199,7 @@ A claim value of `*` (`QitsClaims.ANY`) covers every value. A client granted
 `project=*` passes `requireProject(anything)`.
 
 That is how a service acting across all of something holds its claim rather than
-being granted a list that grows: qits-artifacts hosts every project's git
+being granted a list that grows: qits-githost holds every project's
 repositories, so its token says `project=*`.
 
 The wildcard is read on the token side only. Passing `"*"` as the *target* asks
@@ -214,9 +214,15 @@ target. Quarkus REST maps both — no exception mapper needed.
 Reach for `MachineIdentity`'s static methods when the decision is more than an
 equality check; they take the identity explicitly and need no CDI.
 
-Spell claim names and service ids from `QitsClaims` (`PROJECT`, `WORKSPACE`,
-`BRANCH`; `CI`, `CD`, `ARTIFACTS`, `WORKSPACES`, `GATEWAY`; `ANY`). A mistyped claim
-name reads as "claim absent", which is a silent pass on an unenforced path.
+Spell claim names from `QitsClaims` (`PROJECT`, `WORKSPACE`, `BRANCH`, `ANY`). A
+mistyped claim name reads as "claim absent", which is a silent pass on an
+unenforced path.
+
+**Service ids are not in `QitsClaims`, and none may go back in.** Every service
+is deployed once per environment as `<env>-qits-<app>`, so an id is deployment
+knowledge: a service reads its own from `qits.auth.machine.audience` and its
+peers' from injected config. `CI`, `CD`, `ARTIFACTS`, `WORKSPACES` and `GATEWAY`
+were constants here and are gone with the last of the platform-scoped services.
 
 ### The gate
 

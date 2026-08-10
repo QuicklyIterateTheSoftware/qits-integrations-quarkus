@@ -11,8 +11,9 @@ import org.junit.jupiter.api.Test;
 /** Reading a machine token off an identity: what is there, what is not, and what that means. */
 class MachineIdentityTest {
 
-  // Env service ids carry their environment, so they are spelled here rather than in QitsClaims.
+  // Service ids carry their environment, so they are spelled here rather than in QitsClaims.
   private static final String CI = "prod-qits-ci";
+  private static final String ARTIFACTS = "prod-qits-artifacts";
   private static final String WORKSPACES = "prod-qits-workspaces";
 
   @Test
@@ -28,7 +29,7 @@ class MachineIdentityTest {
     SecurityIdentity identity = TestTokens.machine(CI, WORKSPACES).build();
 
     assertTrue(MachineIdentity.hasAudience(identity, WORKSPACES));
-    assertFalse(MachineIdentity.hasAudience(identity, QitsClaims.ARTIFACTS));
+    assertFalse(MachineIdentity.hasAudience(identity, ARTIFACTS));
     assertFalse(MachineIdentity.hasAudience(TestTokens.user("alice"), WORKSPACES));
   }
 
@@ -62,7 +63,7 @@ class MachineIdentityTest {
   @Test
   void aWildcardClaimCoversEveryValue() {
     SecurityIdentity everyProject =
-        TestTokens.machine(QitsClaims.ARTIFACTS, CI)
+        TestTokens.machine(ARTIFACTS, CI)
             .claim(QitsClaims.PROJECT, QitsClaims.ANY)
             .build();
 
@@ -88,15 +89,15 @@ class MachineIdentityTest {
   @Test
   void theShorthandsWantBothTheAudienceAndTheClaim() {
     SecurityIdentity identity =
-        TestTokens.machine(WORKSPACES, QitsClaims.ARTIFACTS)
+        TestTokens.machine(WORKSPACES, ARTIFACTS)
             .claim(QitsClaims.WORKSPACE, "ws-1")
             .claim(QitsClaims.BRANCH, "feature/x")
             .build();
 
-    assertTrue(MachineIdentity.matchesWorkspace(identity, QitsClaims.ARTIFACTS, "ws-1"));
-    assertTrue(MachineIdentity.matchesBranch(identity, QitsClaims.ARTIFACTS, "feature/x"));
+    assertTrue(MachineIdentity.matchesWorkspace(identity, ARTIFACTS, "ws-1"));
+    assertTrue(MachineIdentity.matchesBranch(identity, ARTIFACTS, "feature/x"));
     // Right claim, wrong service: a token minted for artifacts says nothing to qits-ci.
     assertFalse(MachineIdentity.matchesWorkspace(identity, CI, "ws-1"));
-    assertFalse(MachineIdentity.matchesProject(identity, QitsClaims.ARTIFACTS, "ws-1"));
+    assertFalse(MachineIdentity.matchesProject(identity, ARTIFACTS, "ws-1"));
   }
 }
