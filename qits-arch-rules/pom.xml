@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- The platform's shared ArchUnit rules: conventions a build can enforce, packaged so a
+         service enables them with one test-scope dependency and a three-line test class.
+
+         EVERY TYPE THE RULES JUDGE IS NAMED AS A STRING, never as a dependency. The rules reason
+         about jakarta.persistence and qits-eventstream types, and depending on either would (a)
+         need the platform Maven registry, breaking the clone-alone build rule, and (b) couple this
+         module's version to qits-eventstream's for no runtime gain — ArchUnit reads bytecode, and
+         bytecode carries names. The price is that a rename over there silently un-matches a rule
+         here; the fixture mirror in this module's test sources is where that would surface, and
+         the rule javadoc names the contract. -->
+    <parent>
+        <groupId>eu.wohlben.qits</groupId>
+        <artifactId>qits-integrations-quarkus</artifactId>
+        <version>2026.807.165756</version>
+    </parent>
+
+    <artifactId>qits-arch-rules</artifactId>
+    <packaging>jar</packaging>
+    <name>qits-arch-rules</name>
+
+    <properties>
+        <archunit.version>1.4.1</archunit.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <!-- Compile scope on purpose: a consumer declares THIS module in test scope and gets
+                 the ArchUnit engine transitively, so "enable the rules" stays one dependency. -->
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>${archunit.version}</version>
+        </dependency>
+
+        <dependency>
+            <!-- For the FIXTURES only: the self-test entities need real @Entity/@EntityListeners
+                 bytecode to run the rules against. The rules themselves never touch this API. -->
+            <groupId>jakarta.persistence</groupId>
+            <artifactId>jakarta.persistence-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

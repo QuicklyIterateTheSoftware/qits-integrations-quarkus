@@ -1,13 +1,50 @@
 # qits-integrations-quarkus
 
-Quarkus glue every qits service needs and no service owns. One module today:
+Quarkus glue every qits service needs and no service owns. Two modules today:
 
 | Module | Coordinates | What it is |
 | --- | --- | --- |
 | `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Forward-auth for user traffic, claim checks for machine tokens, and the one gate that turns machine enforcement on. |
+| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared ArchUnit rules: platform conventions a service's own build enforces. Today, the causation-row completeness rules. |
 
 Build: `./mvnw verify`. A clone of this repo alone must build — no monorepo, no
 prior `mvn install`.
+
+---
+
+# qits-arch-rules
+
+One test-scope dependency and a three-line test class turn the platform's conventions into build
+failures:
+
+```xml
+<dependency>
+    <groupId>eu.wohlben.qits</groupId>
+    <artifactId>qits-arch-rules</artifactId>
+    <version>…</version>
+    <scope>test</scope>
+</dependency>
+```
+
+```java
+@AnalyzeClasses(packages = "eu.wohlben.qits.<service>",
+    importOptions = ImportOption.DoNotIncludeTests.class)
+class ArchRulesTest {
+  @ArchTest static final ArchTests CAUSATION = ArchTests.in(CausationRowRules.class);
+}
+```
+
+`CausationRowRules` guards qits-eventstream's row stamping, whose participation is opt-in per
+entity and therefore silently forgettable. Three rules: every `@Entity` either implements
+`CausedRow` or declares `@Uncaused`; every entity that implements `CausedRow` lists
+`CausationStamp` in its `@EntityListeners`; nothing carries `@Uncaused` and `CausedRow` at once.
+Forgetting becomes a red build naming the entity; opting out becomes one reviewable line.
+
+The rules judge types **by fully-qualified name** — this module deliberately depends on neither
+qits-eventstream nor jakarta.persistence. Bytecode carries names, a bare clone builds without the
+platform registry, and the two libraries' versions stay uncoupled. The contract that buys: a rename
+in qits-eventstream must update the rules' constants and the fixture mirror in this module's test
+sources, where the drift surfaces first.
 
 ---
 
