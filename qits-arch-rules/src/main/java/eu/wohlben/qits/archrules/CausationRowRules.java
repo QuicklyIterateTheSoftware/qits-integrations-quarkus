@@ -50,6 +50,12 @@ public final class CausationRowRules {
 
   private CausationRowRules() {}
 
+  // Every rule carries allowEmptyShould(true), and the reason is the same for all three: a match
+  // set that comes up empty is the BEST state a rule describes, not a misconfigured rule. Measured
+  // on qits-projects' epics module, 2026-08-10: all four entities participated, nothing was
+  // @Uncaused, and ArchUnit's fail-on-empty default turned the ideal package into a red build.
+  // A repo with no entities at all earns the same pass from the other two rules.
+
   /** The decision rule: participate or opt out, in writing. */
   @ArchTest
   public static final ArchRule everyEntityDecidesAboutCausation =
@@ -59,7 +65,8 @@ public final class CausationRowRules {
           .should(implementCausedRowOrDeclareUncaused())
           .because(
               "an entity that silently skips causation is a hole in the trace nothing reports;"
-                  + " implement CausedRow or declare @Uncaused where a reviewer reads it");
+                  + " implement CausedRow or declare @Uncaused where a reviewer reads it")
+          .allowEmptyShould(true);
 
   /**
    * The wiring rule: an entity that implements the interface without attaching the listener is the
@@ -73,7 +80,8 @@ public final class CausationRowRules {
           .and()
           .implement(CAUSED_ROW)
           .should(listEntityListener(CAUSATION_STAMP))
-          .because("CausedRow without @EntityListeners(CausationStamp.class) stamps nothing");
+          .because("CausedRow without @EntityListeners(CausationStamp.class) stamps nothing")
+          .allowEmptyShould(true);
 
   /** The contradiction guard: a class cannot both participate and claim it does not. */
   @ArchTest
@@ -83,7 +91,8 @@ public final class CausationRowRules {
           .areAnnotatedWith(UNCAUSED)
           .should()
           .implement(CAUSED_ROW)
-          .because("@Uncaused on a CausedRow contradicts itself; drop one");
+          .because("@Uncaused on a CausedRow contradicts itself; drop one")
+          .allowEmptyShould(true);
 
   private static ArchCondition<JavaClass> implementCausedRowOrDeclareUncaused() {
     return new ArchCondition<>(

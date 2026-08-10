@@ -25,11 +25,26 @@ class CausationRowRulesTest {
   private static final JavaClasses FORGOTTEN =
       new ClassFileImporter().importPackages("eu.wohlben.qits.archrules.fixtures.forgotten");
 
+  private static final JavaClasses ENTITYLESS =
+      new ClassFileImporter().importPackages("eu.wohlben.qits.archrules.fixtures.entityless");
+
   @Test
   void aPackageWhereEveryEntityDecidedPassesAllThreeRules() {
     assertClean(CausationRowRules.everyEntityDecidesAboutCausation, GOOD);
     assertClean(CausationRowRules.everyCausedRowAttachesTheStamp, GOOD);
     assertClean(CausationRowRules.uncausedMeansUncaused, GOOD);
+  }
+
+  /**
+   * An empty match set is the BEST state a rule describes — every entity participating leaves the
+   * opt-out rules nothing to look at, and that must pass, not fail as a "misconfigured" rule.
+   * Measured on qits-projects' epics module before {@code allowEmptyShould} joined the rules.
+   */
+  @Test
+  void aPackageWithNothingToJudgePassesAllThreeRules() {
+    assertClean(CausationRowRules.everyEntityDecidesAboutCausation, ENTITYLESS);
+    assertClean(CausationRowRules.everyCausedRowAttachesTheStamp, ENTITYLESS);
+    assertClean(CausationRowRules.uncausedMeansUncaused, ENTITYLESS);
   }
 
   /**
