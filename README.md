@@ -26,6 +26,7 @@ answered 404 for a repository that exists. In both cases the database was back s
 | --- | --- |
 | `PatientPgDriver` | Holds a *connection request* while postgres comes back. Universal — three config lines per datasource, no code. |
 | `DbRetry` | Retries a *block of work* whose connection died mid-flight. Placed by hand, at read seams. |
+| `DbRetry.inNewTx` | The same, for a **write**: it owns the transaction, so it can retry only the attempts that certainly did not commit. |
 
 ```xml
 <dependency>
@@ -140,10 +141,102 @@ companion rules that go with it: a failed read is a 5xx and never a "not found",
 writes during bootstrap keep client-side retry. `db-patience-plan.md` beside it carries the
 measurements.
 
+## DbRetry.inNewTx — the same patience, for a write
+
+`DbRetry.call` cannot help a write, and says so: a connection that died during the commit round trip
+would be retried into a second write. `inNewTx` closes that gap by **owning the transaction
+boundary**, which is the only position from which the outcome is knowable.
+
+```java
+var id = DbRetry.inNewTx("record the deployment", () -> deployments.record(spec));
+
+DbRetry.runInNewTx("mark the run finished", () -> run.finish(at));
+```
+
+Every attempt is `QuarkusTransaction.requiringNew()`, so no attempt inherits the previous one's dead
+connection or its rolled-back state. The `Runnable` form has its own name rather than being an
+overload: `() -> repository.delete(id)` fits a `Runnable` and a `Callable` at once, and two
+same-named methods would make that call site ambiguous.
+
+### The taxonomy
+
+| | |
+| --- | --- |
+| **Retry** | A connection-class failure thrown **out of the body** — the statement phase. Quarkus rolls a failed body back and never commits it, so the position is known: nothing was written. |
+| **Rethrow** | Everything the transaction manager itself reports — commit, rollback, heuristic, XA. That is where the ambiguity lives. |
+| **Rethrow** | Every non-connection failure, exactly as `DbRetry.call` does. A constraint violation is equally certain not to have committed, and equally certain to fail the same way on the second attempt. |
+
+Both conditions are needed, and they are not the same condition. *The body threw it* is what makes a
+second attempt **safe**. *It is a connection failure* is what makes a second attempt **worth
+making**. Uncertain classifies as rethrow: a caller erroring honestly beats a double-executed write.
+
+### The residue, which is by design
+
+**A failure inside the commit acknowledgement is rethrown.** That one round trip is genuinely
+undecidable from the client — the database may have committed and lost the answer on the way back.
+Nothing here can make it safe, and this method does not pretend to.
+
+**A rollback the transaction manager claims is not evidence**, which is the surprising half.
+Measured on a real wire, 2026-08-11 (`DbRetryInNewTxTest`): killing the connection inside the commit
+produces `QuarkusTransactionException: jakarta.transaction.RollbackException: ARJUNA016053: Could
+not commit transaction.` — no cause, no mention of a connection. Narayana spells "the commit could
+not be delivered" and "the transaction was rolled back before committing" with the same exception
+type, so believing the word *rollback* there would retry exactly the write that may already be in
+the database. The whole commit phase is therefore rethrown.
+
+**A flush-phase loss is a commit-phase loss unless you make it otherwise.** An ORM flushes at commit
+by default, which puts the write on the far side of that line. `entityManager.flush()` (or
+`Panache.flush()`) as the last statement of the body moves it into the statement phase, where the
+classification is certain. One line, and it is the difference between this helping and this
+reporting.
+
+**The retry is the whole body.** Anything in it that is not a database write — a message sent, a
+file written, a counter bumped — happens once per attempt.
+
+### Idempotent writes need none of this
+
+A write that is idempotent by construction — an upsert, an insert on a natural key, a
+set-to-a-fixed-value update — is safe under plain `DbRetry.call` no matter where the connection
+died, because a second execution of it is not a second effect. **That judgement belongs at the call
+site**, the only place that knows the write's shape; `inNewTx` cannot see it and must not assume it.
+
+### What it needs
+
+A running Quarkus application — a transaction manager — which the rest of this class does not. It
+needs no *request* context, so a background worker may call it. Call it from outside any open
+transaction: joining an existing one would make "a fresh transaction per attempt" a lie. A checked
+exception from the body reaches the caller unchanged.
+
+### How the claims are proved
+
+Against a **real postgres**, through a hand-rolled TCP proxy that dies on command
+(`testdb/KillableProxy`, the `StubEventsServer` bargain in fewer lines). Zonky spawns postgres from
+Maven artifacts, so a clone of this repo alone still tests green with no docker. Five wire tests: a
+statement-phase kill retried with the row landing exactly once, a kill before the first statement
+retried, a business failure not retried and rolled back, a `COMMIT` swallowed mid-flight and
+rethrown, and an outage that outlives the deadline. `DbRetryInNewTxClassificationTest` pins the
+outcomes a single-resource local transaction never produces — heuristics, XA.
+
+**The wire suite skips under root**, because zonky's `initdb` refuses to run as the superuser and the
+platform's CI step containers are Alpine running as one. That is a real hole rather than a hidden
+one: the wire proof runs on a developer host, the classifier's unit tests run everywhere, and this
+repo's release pipeline builds with `-DskipTests` in any case.
+
 ## What it depends on, and why so little
 
-`jboss-logging`, plus pgjdbc in provided scope for the driver to delegate to. Hibernate's
-`JDBCConnectionException` is matched **by
+`jboss-logging`, plus two provided-scope dependencies: pgjdbc for the driver to delegate to, and
+`quarkus-narayana-jta` for `inNewTx` to name `QuarkusTransaction`. Provided is what keeps both from
+being felt — it is not transitive, so no consumer inherits a JTA it did not ask for and this
+module's Quarkus version never becomes a fleet-wide pin. Every consumer of `inNewTx` already has JTA;
+a consumer that only wants `DbRetry.call` or `PatientPgDriver` gets nothing new.
+
+The alternative considered and rejected for the JTA dependency: a functional seam, an `inNewTx` that
+takes a transaction runner the consumer supplies. It costs nothing in weight and everything in
+correctness — the classification is only sound because *this* code owns the transaction boundary and
+therefore knows a body failure was rolled back. A seam hands that knowledge back to the caller this
+method exists to protect from getting it wrong.
+
+Hibernate's `JDBCConnectionException` is matched **by
 fully-qualified name**, the qits-arch-rules trick, so the consumer's ORM and this module's version
 stay uncoupled and a bare clone builds with no platform registry. The JDK's own `java.sql`
 connection exceptions are matched by type, and SQLState `08*` / `57P0x` plus the pool's own

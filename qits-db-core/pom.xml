@@ -18,10 +18,10 @@
          The price is qits-arch-rules': a rename in Hibernate silently un-matches. The test sources
          carry a mirror of the type for that reason — the drift surfaces there first.
 
-         Two dependencies. jboss-logging, the logging API every Quarkus application already holds —
-         a retry that says nothing is a service that goes quiet for fifteen seconds with no record
-         of why. And pgjdbc in PROVIDED scope, which the driver delegates to and which every
-         consumer already ships; see the dependency's own note. -->
+         Three dependencies. jboss-logging, the logging API every Quarkus application already holds
+         — a retry that says nothing is a service that goes quiet for fifteen seconds with no record
+         of why. And two in PROVIDED scope, pgjdbc and quarkus-narayana-jta; see each dependency's
+         own note. -->
     <parent>
         <groupId>eu.wohlben.qits</groupId>
         <artifactId>qits-integrations-quarkus</artifactId>
@@ -50,8 +50,78 @@
         </dependency>
 
         <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
+            <!-- PROVIDED, for the same bargain as pgjdbc above. `DbRetry.inNewTx` opens the
+                 transaction it retries, so it must NAME `QuarkusTransaction`, which lives here.
+
+                 Provided is what keeps that from being felt anywhere else: it is not transitive, so
+                 no consumer inherits a JTA it did not ask for, and this module's Quarkus version
+                 never becomes a fleet-wide pin. Every consumer of `inNewTx` already has JTA — a
+                 transaction is what it is asking for — and a consumer that only wants `DbRetry.call`
+                 or `PatientPgDriver` gets nothing new.
+
+                 The alternative considered and rejected: a functional seam, `inNewTx(TxRunner, …)`
+                 supplied by the consumer. It would cost nothing in weight and everything in
+                 correctness — the classification below is only sound because THIS code owns the
+                 transaction boundary and therefore knows a body failure was rolled back. A seam
+                 hands that knowledge to the caller, which is the caller this method exists to
+                 protect from getting it wrong.
+
+                 The no-CDI-context property survives: `QuarkusTransaction` needs a running
+                 application, not a request scope, so a background worker still calls it. Nothing
+                 here is a CDI bean and this module still needs no jandex index. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-narayana-jta</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- The proof rig runs `inNewTx` against a REAL postgres through a proxy the test
+                 kills, so the test scope needs a real pool that enlists in a real transaction
+                 manager. Mocks cannot produce the failures this class classifies. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-agroal</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jdbc-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Real postgres binaries resolved as ordinary Maven artifacts and spawned as a child
+                 process, qits-eventstream's arrangement: a clone of this repo alone must test
+                 green, so testcontainers and dev services are both out. -->
+            <groupId>io.zonky.test</groupId>
+            <artifactId>embedded-postgres</artifactId>
+            <version>${zonky.embedded-postgres.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Named per architecture on purpose: the binaries are separate artifacts and zonky
+                 picks one at run time, so an unnamed arch fails in the middle of a suite rather
+                 than during resolution. -->
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-linux-amd64</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-linux-arm64v8</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-linux-amd64-alpine</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-darwin-arm64v8</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
