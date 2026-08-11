@@ -4,8 +4,10 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <!-- The platform's shared ArchUnit rules: conventions a build can enforce, packaged so a
-         service enables them with one test-scope dependency and a three-line test class.
+    <!-- The platform's shared rules: conventions a build can enforce, packaged so a service enables
+         them with one test-scope dependency and a short test class. ArchUnit rules over the
+         service's bytecode, and one rule over its configuration — both answer "is this service
+         built the way the platform is built", so they ship together.
 
          EVERY TYPE THE RULES JUDGE IS NAMED AS A STRING, never as a dependency. The rules reason
          about jakarta.persistence and qits-eventstream types, and depending on either would (a)
@@ -38,10 +40,28 @@
         </dependency>
 
         <dependency>
+            <!-- PROVIDED: `DatasourceBaselineRules` reads the application's own MicroProfile config,
+                 and every Quarkus consumer already carries the API. Provided keeps it off the
+                 consumer's classpath (a test-scope dependency passes nothing on anyway) and keeps
+                 this module's version out of the fleet's. -->
+            <groupId>org.eclipse.microprofile.config</groupId>
+            <artifactId>microprofile-config-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
             <!-- For the FIXTURES only: the self-test entities need real @Entity/@EntityListeners
                  bytecode to run the rules against. The rules themselves never touch this API. -->
             <groupId>jakarta.persistence</groupId>
             <artifactId>jakarta.persistence-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- The config implementation the tests build their fixtures with — Quarkus' own, so
+                 what the rule sees here is what it sees in a service. No Quarkus server: this is
+                 the config library alone. -->
+            <groupId>io.smallrye.config</groupId>
+            <artifactId>smallrye-config</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

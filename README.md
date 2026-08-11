@@ -5,8 +5,8 @@ Quarkus glue every qits service needs and no service owns. Three modules today:
 | Module | Coordinates | What it is |
 | --- | --- | --- |
 | `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Forward-auth for user traffic, claim checks for machine tokens, and the one gate that turns machine enforcement on. |
-| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared ArchUnit rules: platform conventions a service's own build enforces. Today, the causation-row completeness rules. |
-| `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `DbRetry`, a bounded retry for work that must survive a postgres cutover. |
+| `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, and the datasource baseline. |
+| `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
 
 Build: `./mvnw verify`. A clone of this repo alone must build — no monorepo, no
 prior `mvn install`.
@@ -17,8 +17,15 @@ prior `mvn install`.
 
 ## What it is
 
-`DbRetry` — one static helper, no CDI bean, no ORM dependency. It runs a block of database work and
-**retries connection-class failures only**, until a short deadline.
+Two halves of one answer to the same fact: **the platform restarts its own postgres**, and a cutover
+kills every connection every service is holding. Measured twice on 2026-08-11: a deployment ended
+`FAILED: [JDBCConnectionException …]` while its own container was healthy, and a catalogue read
+answered 404 for a repository that exists. In both cases the database was back seconds later.
+
+| | |
+| --- | --- |
+| `PatientPgDriver` | Holds a *connection request* while postgres comes back. Universal — three config lines per datasource, no code. |
+| `DbRetry` | Retries a *block of work* whose connection died mid-flight. Placed by hand, at read seams. |
 
 ```xml
 <dependency>
@@ -28,6 +35,81 @@ prior `mvn install`.
 </dependency>
 ```
 
+The pgjdbc dependency is **provided**, never compile: every consumer already ships
+`quarkus-jdbc-postgresql`, and a second copy on the classpath would make this module's pgjdbc
+version a fleet-wide pin.
+
+---
+
+## PatientPgDriver
+
+A `java.sql.Driver` that delegates to `org.postgresql.Driver` and retries "the database is not there
+yet" until a deadline. Adoption is one line per datasource, beside the two pool lines it composes
+with:
+
+```properties
+quarkus.datasource.<name>.jdbc.driver=eu.wohlben.qits.db.PatientPgDriver
+quarkus.datasource.<name>.jdbc.validate-on-borrow=true
+quarkus.datasource.<name>.jdbc.acquisition-timeout=15S
+```
+
+`validate-on-borrow` turns a dead pooled connection into a fresh creation *attempt*, which is what
+this driver makes patient. `acquisition-timeout` keeps the Agroal waiter alive while it works. All
+three or none: each one does less than it reads as without the other two.
+
+**Held, not buffered.** The caller's thread blocks inside `connect`, before anything has executed.
+Nothing is acknowledged early, nothing is queued, nothing is applied later. That is why patience here
+is safe for **writes** as well as reads, where retrying an *operation* is not — a commit whose
+acknowledgement was lost still happened. A request that outlives the deadline gets the real failure
+and nothing has happened anywhere. Measured 2026-08-11: 6 workers, 240 calls, an 8.2s hard outage
+mid-run, zero failures; the straddling calls held ~8.6s and succeeded ~0.3s after postgres accepted
+again.
+
+**What is retried, and nothing else:**
+
+| SQLState | |
+| --- | --- |
+| `08*` | The standard connection-exception class — refused, unreachable, connect timeout. |
+| `57P03` | "The database system is starting up." Crash recovery accepts TCP ~1.3s before it serves, so refused-only patience gives up exactly one phase early. |
+
+Everything else is rethrown on the first attempt. A wrong password fails in ~114ms with `28P01`,
+measured — the narrowness is the feature.
+
+| JDBC property | Default | |
+| --- | --- | --- |
+| `qitsPatienceDeadlineMs` | `14000` | Under the fleet's 15S acquisition-timeout on purpose, so a caller sees the database's own refusal rather than a generic acquisition timeout. |
+| `qitsPatiencePauseMs` | `250` | The wait between attempts. |
+
+Set them per datasource with
+`quarkus.datasource.<name>.jdbc.additional-jdbc-properties.qitsPatienceDeadlineMs=…`. Both are
+stripped from what pgjdbc receives, and an unreadable value falls back to the default rather than
+failing a connection while the database is healthy.
+
+**It bounds nothing itself, on purpose.** Agroal serializes all connection creation on one executor
+thread per pool (measured: peak in flight 1, with ten concurrent callers), so at most one patient
+loop runs per datasource and every other caller waits in the acquisition queue under its own 15s
+timeout. A semaphore here would bound something that is already single flight.
+
+It accepts plain `jdbc:postgresql:` URLs — Agroal is handed the driver class explicitly, so there is
+no `DriverManager` ambiguity and the injected `QITS_RESOURCE_*_URL` contract is untouched. For the
+same reason it registers itself with `DriverManager` nowhere: instantiating it is Agroal's job, and a
+global registration could shadow pgjdbc for a caller that never asked for patience.
+
+**Watch item, native builds.** The first consumer to build native must prove that a driver class
+named only in configuration still resolves in the image; reflection registration may be needed. Until
+that build is green, treat native adoption as unproven.
+
+The rule that keeps a service from shipping two of the three lines is
+`DatasourceBaselineRules`, in `qits-arch-rules` below.
+
+---
+
+## DbRetry
+
+One static helper, no CDI bean, no ORM dependency. It runs a block of database work and **retries
+connection-class failures only**, until a short deadline. It is what `PatientPgDriver` cannot be:
+patience for a connection that died *after* statements ran.
+
 ```java
 // 15 seconds by default; pass a Duration for a call site that needs another.
 var repo = DbRetry.call("read the repository catalogue", () -> repositories.findByName(name));
@@ -35,14 +117,7 @@ var repo = DbRetry.call("read the repository catalogue", () -> repositories.find
 DbRetry.run("mark the deployment active", () -> { … });
 ```
 
-## Why it exists
-
-The platform restarts its own postgres. A cutover kills every connection every service is holding.
-Measured twice on 2026-08-11: a deployment ended `FAILED: [JDBCConnectionException …]` while its own
-container was healthy, and a catalogue read answered 404 for a repository that exists. In both cases
-the database was back seconds later.
-
-## Where it goes, and where it must not
+### Where it goes, and where it must not
 
 Wrap work that must survive a short outage — bookkeeping that runs **after** something irreversible
 has already happened, and reads a caller is waiting on. The block must be re-runnable: a read is, a
@@ -53,27 +128,22 @@ attempt.
 It sleeps the calling thread, so on a request thread it holds the request open for up to the
 deadline. Wrap the operations that need it, not every query.
 
-## It is the second half of a pair
-
-The first half is the pool. Every platform datasource carries these two lines (Quarkus 3.34.6 keys,
-verified against `io.quarkus.agroal.runtime.DataSourceJdbcRuntimeConfig`):
-
-```properties
-quarkus.datasource.<name>.jdbc.acquisition-timeout=15S
-quarkus.datasource.<name>.jdbc.validate-on-borrow=true
-```
+### It needs the pool configured for it
 
 `validate-on-borrow` (Quarkus default `false`) evicts a dead connection instead of handing it to a
 caller. Without it this retry spends its whole deadline receiving the same dead connection.
-`acquisition-timeout` (Quarkus default `5S`) bounds how long a request waits on a starved pool.
+`acquisition-timeout` (Quarkus default `5S`) bounds how long a request waits on a starved pool. Both
+keys verified against `io.quarkus.agroal.runtime.DataSourceJdbcRuntimeConfig` (Quarkus 3.34.6).
 
 The superproject's `docs/project-setup-quinoa-angular.md` carries the fleet-wide rule and the two
 companion rules that go with it: a failed read is a 5xx and never a "not found", and cross-service
-writes during bootstrap keep client-side retry.
+writes during bootstrap keep client-side retry. `db-patience-plan.md` beside it carries the
+measurements.
 
 ## What it depends on, and why so little
 
-`jboss-logging`, and nothing else. Hibernate's `JDBCConnectionException` is matched **by
+`jboss-logging`, plus pgjdbc in provided scope for the driver to delegate to. Hibernate's
+`JDBCConnectionException` is matched **by
 fully-qualified name**, the qits-arch-rules trick, so the consumer's ORM and this module's version
 stay uncoupled and a bare clone builds with no platform registry. The JDK's own `java.sql`
 connection exceptions are matched by type, and SQLState `08*` / `57P0x` plus the pool's own
@@ -86,8 +156,8 @@ module's test sources is where that surfaces first.
 
 # qits-arch-rules
 
-One test-scope dependency and a three-line test class turn the platform's conventions into build
-failures:
+One test-scope dependency and a short test class turn the platform's conventions into build
+failures — over the service's bytecode, and over its configuration:
 
 ```xml
 <dependency>
@@ -106,7 +176,9 @@ class ArchRulesTest {
 }
 ```
 
-`CausationRowRules` guards qits-eventstream's row stamping, whose participation is opt-in per
+## CausationRowRules
+
+Guards qits-eventstream's row stamping, whose participation is opt-in per
 entity and therefore silently forgettable. Three rules: every `@Entity` either implements
 `CausedRow` or declares `@Uncaused`; every entity that implements `CausedRow` lists
 `CausationStamp` in its `@EntityListeners`; nothing carries `@Uncaused` and `CausedRow` at once.
@@ -117,6 +189,41 @@ qits-eventstream nor jakarta.persistence. Bytecode carries names, a bare clone b
 platform registry, and the two libraries' versions stay uncoupled. The contract that buys: a rename
 in qits-eventstream must update the rules' constants and the fixture mirror in this module's test
 sources, where the drift surfaces first.
+
+## DatasourceBaselineRules
+
+The datasource resilience baseline, as a build failure. Not an ArchUnit rule — it reads the service's
+own MicroProfile config — but the same bargain, and a plain JUnit test:
+
+```java
+class DatasourceBaselineTest {
+  @Test
+  void everyPostgresDatasourceCarriesTheBaseline() {
+    DatasourceBaselineRules.assertBaseline();
+  }
+}
+```
+
+It finds every datasource the service declares as `db-kind=postgresql` (named, default, or with a
+quoted name) and demands all three lines on each:
+
+```properties
+quarkus.datasource.<name>.jdbc.driver=eu.wohlben.qits.db.PatientPgDriver
+quarkus.datasource.<name>.jdbc.validate-on-borrow=true
+quarkus.datasource.<name>.jdbc.acquisition-timeout=15S
+```
+
+A failure names the datasource, prints the exact line that is missing and what it costs to be
+without it, and points at `docs/project-setup-quinoa-angular.md`. Every missing line is reported at
+once. Datasources of another kind — h2 in a test — are left alone, and a URL over an unset
+environment variable does not derail the scan.
+
+`assertBaseline(Config)` takes a configuration explicitly, for a test that wants to pin one shape.
+
+The driver is named as a **string**, the same trick the ArchUnit rules use: this module depends on
+neither qits-db-core nor a datasource, config carries names, and a bare clone builds with no platform
+registry. The MicroProfile config API is a **provided** dependency — every Quarkus consumer already
+has it on its test classpath.
 
 ---
 
