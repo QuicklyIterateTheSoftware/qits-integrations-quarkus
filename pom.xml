@@ -4,10 +4,10 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <!-- The platform's Quarkus glue: code every qits service needs and no service owns. One module
-         today (`qits-auth-core`); the aggregator exists because there will be more, and because a
-         consuming service lists THIS directory as a reactor module and gets whatever is inside it
-         without editing its pom again.
+    <!-- The platform's Quarkus glue: code every qits service needs and no service owns. The
+         aggregator exists because there is more than one module, and because a consuming service
+         lists THIS directory as a reactor module and gets whatever is inside it without editing
+         its pom again.
 
          A PARENT PLUS MODULES, not qits-eventstream's single root module. That repo produces one
          jar and always will, so its pom is parent and module at once. This one is a category, so
@@ -32,6 +32,7 @@
     <modules>
         <module>qits-auth-core</module>
         <module>qits-arch-rules</module>
+        <module>qits-db-core</module>
     </modules>
 
     <properties>

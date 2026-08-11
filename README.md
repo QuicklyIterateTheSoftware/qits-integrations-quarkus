@@ -1,14 +1,86 @@
 # qits-integrations-quarkus
 
-Quarkus glue every qits service needs and no service owns. Two modules today:
+Quarkus glue every qits service needs and no service owns. Three modules today:
 
 | Module | Coordinates | What it is |
 | --- | --- | --- |
 | `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Forward-auth for user traffic, claim checks for machine tokens, and the one gate that turns machine enforcement on. |
 | `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared ArchUnit rules: platform conventions a service's own build enforces. Today, the causation-row completeness rules. |
+| `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `DbRetry`, a bounded retry for work that must survive a postgres cutover. |
 
 Build: `./mvnw verify`. A clone of this repo alone must build — no monorepo, no
 prior `mvn install`.
+
+---
+
+# qits-db-core
+
+## What it is
+
+`DbRetry` — one static helper, no CDI bean, no ORM dependency. It runs a block of database work and
+**retries connection-class failures only**, until a short deadline.
+
+```xml
+<dependency>
+    <groupId>eu.wohlben.qits</groupId>
+    <artifactId>qits-db-core</artifactId>
+    <version>…</version>
+</dependency>
+```
+
+```java
+// 15 seconds by default; pass a Duration for a call site that needs another.
+var repo = DbRetry.call("read the repository catalogue", () -> repositories.findByName(name));
+
+DbRetry.run("mark the deployment active", () -> { … });
+```
+
+## Why it exists
+
+The platform restarts its own postgres. A cutover kills every connection every service is holding.
+Measured twice on 2026-08-11: a deployment ended `FAILED: [JDBCConnectionException …]` while its own
+container was healthy, and a catalogue read answered 404 for a repository that exists. In both cases
+the database was back seconds later.
+
+## Where it goes, and where it must not
+
+Wrap work that must survive a short outage — bookkeeping that runs **after** something irreversible
+has already happened, and reads a caller is waiting on. The block must be re-runnable: a read is, a
+write that re-reads what it touches and sets it to the same values is. **A bare `insert` is not** —
+a commit whose outcome the connection died before reporting would be duplicated by a second
+attempt.
+
+It sleeps the calling thread, so on a request thread it holds the request open for up to the
+deadline. Wrap the operations that need it, not every query.
+
+## It is the second half of a pair
+
+The first half is the pool. Every platform datasource carries these two lines (Quarkus 3.34.6 keys,
+verified against `io.quarkus.agroal.runtime.DataSourceJdbcRuntimeConfig`):
+
+```properties
+quarkus.datasource.<name>.jdbc.acquisition-timeout=15S
+quarkus.datasource.<name>.jdbc.validate-on-borrow=true
+```
+
+`validate-on-borrow` (Quarkus default `false`) evicts a dead connection instead of handing it to a
+caller. Without it this retry spends its whole deadline receiving the same dead connection.
+`acquisition-timeout` (Quarkus default `5S`) bounds how long a request waits on a starved pool.
+
+The superproject's `docs/project-setup-quinoa-angular.md` carries the fleet-wide rule and the two
+companion rules that go with it: a failed read is a 5xx and never a "not found", and cross-service
+writes during bootstrap keep client-side retry.
+
+## What it depends on, and why so little
+
+`jboss-logging`, and nothing else. Hibernate's `JDBCConnectionException` is matched **by
+fully-qualified name**, the qits-arch-rules trick, so the consumer's ORM and this module's version
+stay uncoupled and a bare clone builds with no platform registry. The JDK's own `java.sql`
+connection exceptions are matched by type, and SQLState `08*` / `57P0x` plus the pool's own
+acquisition-timeout wording cover the rest.
+
+The price is qits-arch-rules': a rename in Hibernate silently un-matches. The mirror in this
+module's test sources is where that surfaces first.
 
 ---
 

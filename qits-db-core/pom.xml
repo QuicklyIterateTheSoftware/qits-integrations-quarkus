@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- The platform's shared database resilience: one bounded retry for work that must survive a
+         postgres cutover, and nothing else.
+
+         AS THIN AS qits-arch-rules, and for the same two reasons. It carries no CDI bean, so it
+         needs no quarkus-arc and no jandex index — `DbRetry` is static, which is also what lets a
+         background worker with no request context call it. And it depends on neither
+         hibernate-core nor a JDBC driver: the JDK's own `java.sql` exceptions are matched by type,
+         and Hibernate's `JDBCConnectionException` BY FULLY-QUALIFIED NAME, so a consumer's ORM and
+         this module's version stay uncoupled and a bare clone builds with no platform registry.
+
+         The price is qits-arch-rules': a rename in Hibernate silently un-matches. The test sources
+         carry a mirror of the type for that reason — the drift surfaces there first.
+
+         The one dependency is jboss-logging, the logging API every Quarkus application already
+         holds. A retry that says nothing is a service that goes quiet for fifteen seconds with no
+         record of why. -->
+    <parent>
+        <groupId>eu.wohlben.qits</groupId>
+        <artifactId>qits-integrations-quarkus</artifactId>
+        <version>2026.810.184518</version>
+    </parent>
+
+    <artifactId>qits-db-core</artifactId>
+    <packaging>jar</packaging>
+    <name>qits-db-core</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>jboss-logging</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

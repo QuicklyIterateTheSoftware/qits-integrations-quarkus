@@ -4,6 +4,7 @@ when:
 artifacts:
   - { type: maven, name: "eu.wohlben.qits:qits-auth-core" }
   - { type: maven, name: "eu.wohlben.qits:qits-arch-rules" }
+  - { type: maven, name: "eu.wohlben.qits:qits-db-core" }
 steps:
   - image: qits/build-images/maven-base:latest
     timeout-seconds: 1800
@@ -15,8 +16,9 @@ steps:
       # Skip only when EVERY module of this reactor is published: `deploy` runs at the root
       # and ships them together, so one missing module means the whole run must go again.
       if curl -fsS -o /dev/null "$QITS_MAVEN_REGISTRY_URL/eu/wohlben/qits/qits-auth-core/$version/qits-auth-core-$version.pom" \
-        && curl -fsS -o /dev/null "$QITS_MAVEN_REGISTRY_URL/eu/wohlben/qits/qits-arch-rules/$version/qits-arch-rules-$version.pom"; then
-        echo "qits-auth-core and qits-arch-rules @$version are already published — skipping"
+        && curl -fsS -o /dev/null "$QITS_MAVEN_REGISTRY_URL/eu/wohlben/qits/qits-arch-rules/$version/qits-arch-rules-$version.pom" \
+        && curl -fsS -o /dev/null "$QITS_MAVEN_REGISTRY_URL/eu/wohlben/qits/qits-db-core/$version/qits-db-core-$version.pom"; then
+        echo "every module @$version is already published — skipping"
         exit 0
       fi
       ./mvnw -B -ntp deploy -DskipTests \
