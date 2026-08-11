@@ -4,22 +4,24 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <!-- The platform's shared database resilience: one bounded retry for work that must survive a
-         postgres cutover, and nothing else.
+    <!-- The platform's shared database resilience: patience where a connection is opened
+         (`PatientPgDriver`), one bounded retry for work that must survive a postgres cutover
+         (`DbRetry`), and nothing else.
 
          AS THIN AS qits-arch-rules, and for the same two reasons. It carries no CDI bean, so it
-         needs no quarkus-arc and no jandex index — `DbRetry` is static, which is also what lets a
-         background worker with no request context call it. And it depends on neither
-         hibernate-core nor a JDBC driver: the JDK's own `java.sql` exceptions are matched by type,
-         and Hibernate's `JDBCConnectionException` BY FULLY-QUALIFIED NAME, so a consumer's ORM and
-         this module's version stay uncoupled and a bare clone builds with no platform registry.
+         needs no quarkus-arc and no jandex index — both classes are reachable without a request
+         context, which is what lets a background worker call them. And it does not depend on
+         hibernate-core: the JDK's own `java.sql` exceptions are matched by type, and Hibernate's
+         `JDBCConnectionException` BY FULLY-QUALIFIED NAME, so a consumer's ORM and this module's
+         version stay uncoupled and a bare clone builds with no platform registry.
 
          The price is qits-arch-rules': a rename in Hibernate silently un-matches. The test sources
          carry a mirror of the type for that reason — the drift surfaces there first.
 
-         The one dependency is jboss-logging, the logging API every Quarkus application already
-         holds. A retry that says nothing is a service that goes quiet for fifteen seconds with no
-         record of why. -->
+         Two dependencies. jboss-logging, the logging API every Quarkus application already holds —
+         a retry that says nothing is a service that goes quiet for fifteen seconds with no record
+         of why. And pgjdbc in PROVIDED scope, which the driver delegates to and which every
+         consumer already ships; see the dependency's own note. -->
     <parent>
         <groupId>eu.wohlben.qits</groupId>
         <artifactId>qits-integrations-quarkus</artifactId>
@@ -34,6 +36,17 @@
         <dependency>
             <groupId>org.jboss.logging</groupId>
             <artifactId>jboss-logging</artifactId>
+        </dependency>
+
+        <dependency>
+            <!-- PROVIDED, never compile: `PatientPgDriver` delegates to pgjdbc, and every consumer
+                 already ships it inside quarkus-jdbc-postgresql. A compile-scope dependency here
+                 would hand a second copy to every consumer of this module — including the ones that
+                 only want `DbRetry` — and make this module's pgjdbc version a fleet-wide pin.
+                 Provided is on the test classpath too, so the suite compiles and runs. -->
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>
