@@ -135,6 +135,36 @@ class DatasourceBaselineRulesTest {
   }
 
   @Test
+  void anAcquisitionTimeoutThatIsOnlyQuarkusOwnDefaultDoesNotCount() {
+    // The one line of the three whose absence is invisible: Quarkus answers 5S — the very value the
+    // baseline replaces — and reports it like any other value, from a source at the bottom ordinal.
+    // A service that never wrote the line has to fail, or the rule is checking nothing.
+    Map<String, String> defaults = new LinkedHashMap<>();
+    defaults.put("quarkus.datasource.ci.jdbc.acquisition-timeout", "5S");
+    Config config =
+        new SmallRyeConfigBuilder()
+            .withSources(
+                new PropertiesConfigSource(
+                    Map.of(
+                        "quarkus.datasource.ci.db-kind", "postgresql",
+                        "quarkus.datasource.ci.jdbc.driver", DatasourceBaselineRules.PATIENT_DRIVER,
+                        "quarkus.datasource.ci.jdbc.validate-on-borrow", "true"),
+                    "the service",
+                    250))
+            .withSources(new PropertiesConfigSource(defaults, "DefaultValuesConfigSource", Integer.MIN_VALUE))
+            .build();
+
+    AssertionError caught =
+        assertThrows(AssertionError.class, () -> DatasourceBaselineRules.assertBaseline(config));
+
+    assertTrue(
+        caught.getMessage().contains("jdbc.acquisition-timeout=15S"), caught.getMessage());
+    // …and the same key, written by the service, passes.
+    assertDoesNotThrow(
+        () -> DatasourceBaselineRules.assertBaseline(config(baseline("quarkus.datasource.ci."))));
+  }
+
+  @Test
   void aDatasourceOfAnotherKindIsNotThisRulesBusiness() {
     // h2 in a test, and whatever the platform runs next, are left alone.
     assertDoesNotThrow(

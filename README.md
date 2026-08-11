@@ -311,6 +311,15 @@ without it, and points at `docs/project-setup-quinoa-angular.md`. Every missing 
 once. Datasources of another kind — h2 in a test — are left alone, and a URL over an unset
 environment variable does not derail the scan.
 
+**`acquisition-timeout` must be written down, not merely answerable.** It is the one line of the
+three whose absence is invisible: Quarkus defaults it to `5S` — the very value the baseline replaces
+— and reports that default like any other value, so a service that never wrote the line used to
+pass. Measured on a live Quarkus 3.34.6 configuration, 2026-08-11: an unset `jdbc.max-size` answers
+`50` and *appears among the property names*, from a source called `DefaultValuesConfigSource` at
+ordinal `Integer.MIN_VALUE`. So neither the name nor the value decides it; where it came from does.
+The rule now demands a declaration, from any source a person could have written, in the plain or the
+profiled (`%prod.`) spelling. Every fleet service already writes `15S`, so this breaks nobody.
+
 `assertBaseline(Config)` takes a configuration explicitly, for a test that wants to pin one shape.
 
 The driver is named as a **string**, the same trick the ArchUnit rules use: this module depends on

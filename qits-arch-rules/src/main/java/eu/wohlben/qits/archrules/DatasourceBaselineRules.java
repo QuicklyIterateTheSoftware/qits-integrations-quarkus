@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.TreeMap;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
+import org.eclipse.microprofile.config.ConfigValue;
 
 /**
  * The datasource resilience baseline, as a build failure.
@@ -24,6 +25,11 @@ import org.eclipse.microprofile.config.ConfigProvider;
  * patient; {@code acquisition-timeout} keeps the pool's waiter alive while it works. Miss one and
  * the other two do less than they read as. The doctrine and the measurements live in the
  * superproject's {@code docs/project-setup-quinoa-angular.md}.
+ *
+ * <p><b>{@code acquisition-timeout} must be written down, not merely answerable.</b> Quarkus
+ * defaults it to {@code 5S} and reports that default like any other value, so a service that never
+ * wrote the line used to pass this rule — the one line of the three whose absence is invisible. It
+ * is now checked as a declaration: see {@code declared} for the measurement.
  *
  * <p><b>Why a config rule sits with the ArchUnit rules.</b> Both answer the same question — is this
  * service built the way the platform is built — and both are enabled the same way: one test-scope
@@ -92,7 +98,7 @@ public final class DatasourceBaselineRules {
       }
 
       String acquisition = prefix + "jdbc.acquisition-timeout";
-      if (value(config, acquisition).filter(v -> !v.isBlank()).isEmpty()) {
+      if (!declared(config, acquisition)) {
         missing.add(
             line(
                 name,
@@ -142,6 +148,48 @@ public final class DatasourceBaselineRules {
     return name.length() > 1 && name.startsWith("\"") && name.endsWith("\"")
         ? name.substring(1, name.length() - 1)
         : name;
+  }
+
+  /**
+   * Whether a property is <b>written down</b>, as opposed to merely answerable.
+   *
+   * <p>This exists because one line of the baseline has a Quarkus default and the other two do not.
+   * {@code jdbc.driver} defaults to nothing and {@code validate-on-borrow} defaults to the wrong
+   * value, so reading them is enough. {@code acquisition-timeout} defaults to {@code 5S} — the very
+   * value the baseline is there to replace — so a service that never wrote the line reads as
+   * complete. Measured on a live Quarkus 3.34.6 configuration, 2026-08-11: an unset {@code
+   * jdbc.max-size} answers {@code 50} and <b>appears among the property names</b>, from a source
+   * called {@code DefaultValuesConfigSource} at ordinal {@code Integer.MIN_VALUE}.
+   *
+   * <p>So the name alone does not decide it and the value alone does not either. What separates a
+   * declaration from a default is where it came from: a name that is present, from any source a
+   * person could have written.
+   *
+   * <p>An unresolvable expression counts as declared. The line is there; what it evaluates to in a
+   * test JVM with no environment is not this rule's business.
+   */
+  private static boolean declared(Config config, String property) {
+    boolean named = false;
+    for (String name : config.getPropertyNames()) {
+      // A profiled spelling is the same declaration: `%prod.` in front of the key, and the key
+      // itself is what the fleet writes.
+      if (name.equals(property) || (name.startsWith("%") && name.endsWith("." + property))) {
+        named = true;
+        break;
+      }
+    }
+    if (!named) {
+      return false;
+    }
+    try {
+      ConfigValue found = config.getConfigValue(property);
+      if (found == null || found.getValue() == null || found.getValue().isBlank()) {
+        return false;
+      }
+      return found.getSourceOrdinal() > Integer.MIN_VALUE;
+    } catch (RuntimeException unresolvable) {
+      return true;
+    }
   }
 
   /**
