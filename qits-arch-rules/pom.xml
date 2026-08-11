@@ -19,7 +19,7 @@
     <parent>
         <groupId>eu.wohlben.qits</groupId>
         <artifactId>qits-integrations-quarkus</artifactId>
-        <version>2026.810.184518</version>
+        <version>2026.811.165001</version>
     </parent>
 
     <artifactId>qits-arch-rules</artifactId>
