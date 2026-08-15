@@ -1,7 +1,7 @@
 package eu.wohlben.qits.auth;
 
 import static io.restassured.RestAssured.given;
-import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
 
 import io.quarkus.test.junit.QuarkusTest;
@@ -54,17 +54,43 @@ class ForwardAuthTest {
   }
 
   @Test
-  void theIdentityCarriesNoRoles() {
-    // The gateway emits no groups header and makes the one role decision the system has (§4.3), so
-    // a role arriving here would mean something upstream had started asserting one.
+  void theIdentityCarriesTheRolesAssertedByTheEdge() {
     given()
         .header("X-Qits-User", "alice")
-        .header("X-Qits-Groups", "admin")
+        .header("X-Qits-Roles", "qits:admin, qits-platform:admin, qits:admin,,")
         .when()
         .get("/test-identity")
         .then()
         .statusCode(200)
         .body("principal", equalTo("alice"))
-        .body("roles", empty());
+        .body("roles", containsInAnyOrder("qits:admin", "qits-platform:admin"));
+  }
+
+  @Test
+  void rolesAllowedAcceptsTheForwardedRole() {
+    given()
+        .header("X-Qits-User", "alice")
+        .header("X-Qits-Roles", "qits:admin")
+        .when()
+        .get("/admin-echo")
+        .then()
+        .statusCode(200)
+        .body(equalTo("ok"));
+  }
+
+  @Test
+  void rolesAllowedRejectsAUserWithoutTheForwardedRole() {
+    given()
+        .header("X-Qits-User", "alice")
+        .header("X-Qits-Roles", "qits:reader")
+        .when()
+        .get("/admin-echo")
+        .then()
+        .statusCode(403);
+  }
+
+  @Test
+  void rolesAllowedChallengesAnAnonymousRequest() {
+    given().when().get("/admin-echo").then().statusCode(401);
   }
 }
