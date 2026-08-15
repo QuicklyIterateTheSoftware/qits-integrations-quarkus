@@ -5,6 +5,7 @@ import io.quarkus.security.identity.IdentityProvider;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.quarkus.security.runtime.QuarkusPrincipal;
 import io.quarkus.security.runtime.QuarkusSecurityIdentity;
+import io.quarkus.vertx.http.runtime.security.HttpSecurityUtils;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 
@@ -30,11 +31,17 @@ public class ForwardAuthIdentityProvider implements IdentityProvider<ForwardedAu
   @Override
   public Uni<SecurityIdentity> authenticate(
       ForwardedAuthenticationRequest request, AuthenticationRequestContext context) {
+    var roles = new java.util.LinkedHashSet<>(request.roles());
+    var routingContext = HttpSecurityUtils.getRoutingContextAttribute(request);
+    if (routingContext != null) {
+      roles.addAll(ForwardAuthMechanism.roles(
+          routingContext.request().getHeader("X-Qits-Roles")));
+    }
     return Uni.createFrom()
         .item(
             QuarkusSecurityIdentity.builder()
                 .setPrincipal(new QuarkusPrincipal(request.user()))
-                .addRoles(request.roles())
+                .addRoles(roles)
                 .build());
   }
 }
