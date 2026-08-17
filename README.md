@@ -336,7 +336,7 @@ has it on its test classpath.
 Two tracks of identity, in one jar.
 
 **Users** arrive through qits-gateway, which performs the login and injects
-`X-Qits-User`. `ForwardAuthMechanism` turns that header into a
+`X-Qits-User` and `X-Qits-Roles`. `ForwardAuthMechanism` turns those headers into a
 `SecurityIdentity`. A service authenticates nothing itself; the header is
 believed because the gateway strips every client-supplied `X-Qits-*` header
 first. This pair was copy-pasted into eight services and is now in one place —
@@ -356,8 +356,8 @@ the vocabulary, the claim checks and the gate.
 
 | Class | |
 | --- | --- |
-| `ForwardAuthMechanism` | Reads `X-Qits-User` into a `SecurityIdentity`; no header is anonymous, not a denial. |
-| `ForwardAuthIdentityProvider` | Completes that request into an identity whose principal is the username. No roles. |
+| `ForwardAuthMechanism` | Reads `X-Qits-User` and the comma-separated `X-Qits-Roles`; no user header is anonymous, not a denial. |
+| `ForwardAuthIdentityProvider` | Completes that request into an identity whose principal and roles are available to standard Jakarta security annotations. |
 | `QitsClaims` | The claim names (`project`, `workspace`, `branch`) and the `*` that covers every value. Service ids are config, never constants. |
 | `MachineIdentity` | Static, CDI-free reads of a validated token off a `SecurityIdentity`. |
 | `MachineAuth` | The `require*` guards, and the rollout gate they sit behind. |

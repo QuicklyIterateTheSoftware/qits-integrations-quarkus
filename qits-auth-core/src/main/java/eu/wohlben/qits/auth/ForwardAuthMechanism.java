@@ -4,7 +4,6 @@ import io.quarkus.runtime.LaunchMode;
 import io.quarkus.security.identity.IdentityProviderManager;
 import io.quarkus.security.identity.SecurityIdentity;
 import io.quarkus.security.identity.request.AuthenticationRequest;
-import io.quarkus.security.identity.request.TrustedAuthenticationRequest;
 import io.quarkus.vertx.http.runtime.security.ChallengeData;
 import io.quarkus.vertx.http.runtime.security.HttpAuthenticationMechanism;
 import io.quarkus.vertx.http.runtime.security.HttpSecurityUtils;
@@ -12,6 +11,7 @@ import io.smallrye.mutiny.Uni;
 import io.vertx.ext.web.RoutingContext;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.Optional;
+import java.util.LinkedHashSet;
 import java.util.Set;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -43,13 +43,20 @@ public class ForwardAuthMechanism implements HttpAuthenticationMechanism {
   @ConfigProperty(name = "qits.auth.forward.user-header")
   String userHeader;
 
+  @ConfigProperty(name = "qits.auth.forward.roles-header")
+  String rolesHeader;
+
   @ConfigProperty(name = "qits.auth.forward.dev-user")
   Optional<String> devUser;
+
+  @ConfigProperty(name = "qits.auth.forward.dev-roles")
+  Optional<String> devRoles;
 
   @Override
   public Uni<SecurityIdentity> authenticate(
       RoutingContext context, IdentityProviderManager identityProviderManager) {
     String user = context.request().getHeader(userHeader);
+    String assertedRoles = context.request().getHeader(rolesHeader);
     if (user == null || user.isBlank()) {
       // The %dev/%test-scoped synthetic identity — no gateway in front of dev mode or a test suite,
       // and this is what keeps a service's suite runnable with no auth setup at all. LaunchMode
@@ -59,12 +66,14 @@ public class ForwardAuthMechanism implements HttpAuthenticationMechanism {
         return Uni.createFrom().nullItem();
       }
       user = devUser.get();
+      assertedRoles = devRoles.orElse(null);
     }
     // Through the IdentityProviderManager (not building the identity here) so
     // SecurityIdentityAugmentors keep working.
     return identityProviderManager.authenticate(
         HttpSecurityUtils.setRoutingContextAttribute(
-            new TrustedAuthenticationRequest(user), context));
+            new ForwardedAuthenticationRequest(user, roles(assertedRoles)),
+            context));
   }
 
   @Override
@@ -74,6 +83,20 @@ public class ForwardAuthMechanism implements HttpAuthenticationMechanism {
 
   @Override
   public Set<Class<? extends AuthenticationRequest>> getCredentialTypes() {
-    return Set.of(TrustedAuthenticationRequest.class);
+    return Set.of(ForwardedAuthenticationRequest.class);
+  }
+
+  static Set<String> roles(String header) {
+    Set<String> roles = new LinkedHashSet<>();
+    if (header == null || header.isBlank()) {
+      return roles;
+    }
+    for (String role : header.split(",")) {
+      String read = role.strip();
+      if (!read.isEmpty()) {
+        roles.add(read);
+      }
+    }
+    return roles;
   }
 }
