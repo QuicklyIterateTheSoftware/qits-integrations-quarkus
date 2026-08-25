@@ -1,12 +1,13 @@
 # qits-integrations-quarkus
 
-Quarkus glue every qits service needs and no service owns. Three modules today:
+Quarkus glue every qits service needs and no service owns. Four modules today:
 
 | Module | Coordinates | What it is |
 | --- | --- | --- |
 | `qits-auth-core/` | `eu.wohlben.qits:qits-auth-core` | Forward-auth for user traffic, claim checks for machine tokens, and the one gate that turns machine enforcement on. |
 | `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, and the datasource baseline. |
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
+| `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
 
 Build: `./mvnw verify`. A clone of this repo alone must build — no monorepo, no
 prior `mvn install`.
@@ -563,3 +564,48 @@ minted for another service.
 
 Each service sets `qits.auth.machine.audience` to its own id, so `require()`
 already means "a token minted for me".
+
+---
+
+# qits-environment-core
+
+## What it is
+
+The environment tier as an ambient value. The platform has environments (`dev`, `prod`) and one
+platform plane serving all of them; qits-deployments injects `QITS_ENVIRONMENT=<name>` into every
+environment-tier service and deliberately nothing into a platform-tier one. This module makes that
+fact travel:
+
+- **`EnvironmentClientFilter`** stamps `X-Qits-Environment` on every outgoing REST-client request:
+  `qits.environment` (the MicroProfile reading of `QITS_ENVIRONMENT`), or the literal `platform`
+  where a deployment injects none — a process the deployer gives no tier is, by the platform's own
+  definition, serving every tier. A header the caller set itself wins.
+- **`EnvironmentServerFilter`** reads the header on the way in and holds it in
+  **`CallerEnvironment`** for the resource method, so a platform service learns which tier is
+  calling without reading headers itself. Absent or blank is `null` — an unstamped caller is
+  *unknown*, never assumed `platform`, because an absence of a claim is not a claim.
+- **`EnvironmentHeader`** is the constants: `NAME`, `PROPERTY`, `PLATFORM`.
+
+Both filters are `@Provider`-discovered through the jandex index: a consumer registers nothing, and
+a consumer without `quarkus-rest`/`quarkus-rest-client` never instantiates them. The pom carries
+the JAX-RS, annotation and MP-config **API jars only** — never `quarkus-rest`, which would bolt an
+HTTP server onto every consumer.
+
+```xml
+<dependency>
+    <groupId>eu.wohlben.qits</groupId>
+    <artifactId>qits-environment-core</artifactId>
+</dependency>
+```
+
+The header is inside the edge's reserved `X-Qits-*` namespace on purpose: qits-platform-edge strips
+every client-supplied `X-Qits-*` header at the outer door, so an outside caller cannot claim a
+tier. A caller building requests by hand (`java.net.http.HttpClient`) stamps the same header itself
+— the snippet is in `EnvironmentHeader`'s javadoc.
+
+**The same property is stamped onto every published event** by `libs/qits-eventstream`
+(`EventEnvelope.environment`, same `platform` fallback), whose extraction rule forbids importing
+`EnvironmentHeader` — the string `qits.environment` is deliberately spelled in both repositories,
+so grep both on a rename. `CallerEnvironment` follows `CausationScope`'s thread discipline whole:
+restore-not-clear, `remove()` for null, a plain `ThreadLocal` that does not follow work — capture
+`current()` before handing work to an executor and re-establish it with `with(...)`.
