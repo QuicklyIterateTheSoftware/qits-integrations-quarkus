@@ -33,6 +33,7 @@
         <module>qits-auth-core</module>
         <module>qits-arch-rules</module>
         <module>qits-db-core</module>
+        <module>qits-environment-core</module>
     </modules>
 
     <properties>
