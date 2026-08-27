@@ -14,6 +14,7 @@ artifacts:
   - { type: maven, name: "eu.wohlben.qits:qits-arch-rules" }
   - { type: maven, name: "eu.wohlben.qits:qits-db-core" }
   - { type: maven, name: "eu.wohlben.qits:qits-environment-core" }
+  - { type: maven, name: "eu.wohlben.qits:qits-service-mock" }
 steps:
   - image: qits/build-images/maven-base:latest
     timeout-seconds: 1800
@@ -33,7 +34,8 @@ steps:
       if curl -fsS -o /dev/null "$QITS_MAVEN_REGISTRY_URL/eu/wohlben/qits/qits-auth-core/$version/qits-auth-core-$version.pom" \
         && curl -fsS -o /dev/null "$QITS_MAVEN_REGISTRY_URL/eu/wohlben/qits/qits-arch-rules/$version/qits-arch-rules-$version.pom" \
         && curl -fsS -o /dev/null "$QITS_MAVEN_REGISTRY_URL/eu/wohlben/qits/qits-db-core/$version/qits-db-core-$version.pom" \
-        && curl -fsS -o /dev/null "$QITS_MAVEN_REGISTRY_URL/eu/wohlben/qits/qits-environment-core/$version/qits-environment-core-$version.pom"; then
+        && curl -fsS -o /dev/null "$QITS_MAVEN_REGISTRY_URL/eu/wohlben/qits/qits-environment-core/$version/qits-environment-core-$version.pom" \
+        && curl -fsS -o /dev/null "$QITS_MAVEN_REGISTRY_URL/eu/wohlben/qits/qits-service-mock/$version/qits-service-mock-$version.pom"; then
         echo "every module @$version is already published — skipping"
         exit 0
       fi

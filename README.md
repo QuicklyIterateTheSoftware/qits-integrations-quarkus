@@ -1,6 +1,6 @@
 # qits-integrations-quarkus
 
-Quarkus glue every qits service needs and no service owns. Four modules today:
+Quarkus glue every qits service needs and no service owns. Five modules today:
 
 | Module | Coordinates | What it is |
 | --- | --- | --- |
@@ -8,6 +8,7 @@ Quarkus glue every qits service needs and no service owns. Four modules today:
 | `qits-arch-rules/` | `eu.wohlben.qits:qits-arch-rules` | Shared rules: platform conventions a service's own build enforces. The causation-row completeness rules, and the datasource baseline. |
 | `qits-db-core/` | `eu.wohlben.qits:qits-db-core` | The database resilience baseline: `PatientPgDriver`, which holds a connection request through a cutover, and `DbRetry` for work that must survive one. |
 | `qits-environment-core/` | `eu.wohlben.qits:qits-environment-core` | The environment tier as an ambient value: `X-Qits-Environment` stamped on every outgoing REST-client request from `qits.environment` (`platform` where a deployment injects none), and `CallerEnvironment` holding the caller's tier for the receiving resource method. |
+| `qits-service-mock/` | `eu.wohlben.qits:qits-service-mock` | Recording mocks of platform services for cross-service integration tests: the generic `MockService` (stub JSON routes, record every request), plus `idp.MockIdp` adding the one thing canned JSON can't fake — key material and RS256 token minting. Test scope for consumers. |
 
 Build: `./mvnw verify`. A clone of this repo alone must build — no monorepo, no
 prior `mvn install`.
@@ -609,3 +610,69 @@ tier. A caller building requests by hand (`java.net.http.HttpClient`) stamps the
 so grep both on a rename. `CallerEnvironment` follows `CausationScope`'s thread discipline whole:
 restore-not-clear, `remove()` for null, a plain `ThreadLocal` that does not follow work — capture
 `current()` before handing work to an executor and re-establish it with `with(...)`.
+
+---
+
+# qits-service-mock
+
+Recording mocks of platform services for cross-service integration tests — the far side of any
+service-to-service interaction, assertable on both ends: the consumer under test acted on the
+response, and the mock's recordings prove this side served it.
+
+```xml
+<dependency>
+    <groupId>eu.wohlben.qits</groupId>
+    <artifactId>qits-service-mock</artifactId>
+    <version>…</version>
+    <scope>test</scope>
+</dependency>
+```
+
+Deliberately **not a Quarkus module**: it backs `@QuarkusIntegrationTest` test profiles, which run
+in a plain JVM before and beside the launched application. JDK `com.sun.net.httpserver` + JCA, one
+Jackson dependency.
+
+## MockService — the generic core
+
+Faking a service is usually **no code at all**: stub the routes the consumer will call, point the
+consumer's config at `baseUrl()`, assert the recordings afterwards. Unknown paths answer 404 *and
+are recorded* — "the consumer called the wrong path" is as assertable as the happy path.
+
+```java
+MockService projects = MockService.start("qits-projects");
+projects.stub("GET", "/projects/api/names/qits/my-repo", Map.of("repositoryId", id));
+// ... boot the consumer against projects.baseUrl(), drive it ...
+projects.recordedRequests();   // did it resolve the name? what did it send?
+```
+
+A service only earns a named class when it has behavior canned JSON cannot fake. There is one so
+far: `idp.MockIdp` below. Write the next one the same way — `MockService` plus only the genuinely
+service-specific part, in its own subpackage.
+
+**The `QuarkusTestProfile` pattern**: a test profile is instantiated in more than one classloader,
+so `ensureStarted(name)` starts once per JVM per name and parks the port in a system property;
+`attach(name)` — from any classloader — rebuilds a handle. Recordings are read back over the
+mock's own `/__mock/requests` control endpoint (itself excluded from recording), so every handle
+sees the same live list. Only the owning instance can `stub(...)`.
+
+## idp.MockIdp — the one specialization
+
+The mock of qits-platform-idp: a `MockService` plus key material. It generates an RSA keypair,
+stubs `GET /idp/jwks` (shaped exactly like the real `idp/control/Jwks`, leading-zero stripping
+included) and a minimal `/idp/.well-known/openid-configuration`, and mints RS256 tokens signed by
+that keypair. The compact JWS is hand-assembled (~40 lines, JCA only) and its correctness pinned
+by a self-test verifying through jose4j — the library quarkus-oidc itself is built on.
+
+```java
+MockIdp idp = MockIdp.start();                       // or ensureStarted()/attach() — same pattern
+String url = idp.baseUrl();                          // -> quarkus.oidc.auth-server-url
+String token = idp.token()
+    .subject("qits-ci").audience("dev-qits-githost").groups("qits:system").mint();
+idp.recordedRequests();                              // did the service fetch /idp/jwks?
+idp.service();                                       // the underlying MockService, for more stubs
+```
+
+Negative-test levers on the builder: `signedByUnknownKey()` (a stranger's signature),
+`kid("no-such-kid")`, `ttl(Duration.ofMinutes(-5))` (already expired), a wrong `audience(...)`.
+`ensureStarted()` additionally parks the encoded keypair in system properties, so an attached
+handle signs with the same key the served JWKS published.
