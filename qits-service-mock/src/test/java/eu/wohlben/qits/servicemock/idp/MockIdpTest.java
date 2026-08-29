@@ -109,6 +109,10 @@ class MockIdpTest {
         List.of("/idp/jwks", "/idp/no-such-path", "/idp/.well-known/openid-configuration"), paths);
     assertTrue(
         idp.recordedRequests().stream().allMatch(r -> "GET".equals(r.method())), "methods recorded");
+    // the delegating handle needs no code of its own for the answered status to come through
+    assertEquals(
+        List.of(200, 404, 200),
+        idp.recordedRequests().stream().map(MockService.RecordedRequest::status).toList());
 
     idp.reset();
     assertEquals(List.of(), idp.recordedRequests(), "reset clears recordings");
