@@ -645,6 +645,12 @@ projects.stub("GET", "/projects/api/names/qits/my-repo", Map.of("repositoryId", 
 projects.recordedRequests();   // did it resolve the name? what did it send?
 ```
 
+A recording is `RecordedRequest(method, path, query, status, at, headers)`. `query` is the **raw**
+query string — verbatim, never decoded or parsed, `null` when the URI carried none, and never part
+of `path`. `status` is what this side answered: the matched stub's status, or 404 for a route no
+stub matched — which is what lets a recording alone say *which* answer the consumer acted on (and
+what a diagram generated from recordings labels its edges with).
+
 A service only earns a named class when it has behavior canned JSON cannot fake. There is one so
 far: `idp.MockIdp` below. Write the next one the same way — `MockService` plus only the genuinely
 service-specific part, in its own subpackage.

@@ -28,8 +28,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * <p>Most fakes need no code at all beyond this class: a canned JSON body per route. Every request
  * is recorded — including ones no stub matches, which answer 404 — because "the consumer called
- * the wrong path" is as assertable as the happy path. A service whose behavior canned JSON cannot
- * fake (the idp's key crypto) gets a thin specialization in a subpackage; see {@code idp.MockIdp}.
+ * the wrong path" is as assertable as the happy path. A recording carries the status this side
+ * answered with, so <i>which</i> answer the consumer acted on is assertable from this end alone. A
+ * service whose behavior canned JSON cannot fake (the idp's key crypto) gets a thin specialization
+ * in a subpackage; see {@code idp.MockIdp}.
  *
  * <p>Two ways in:
  *
@@ -139,7 +141,14 @@ public final class MockService implements AutoCloseable {
     return this;
   }
 
-  /** Every request the mock answered (control traffic excluded), in arrival order. */
+  /**
+   * Every request the mock answered (control traffic excluded), in arrival order — each carrying
+   * the status this side answered it with and the raw query string it arrived with.
+   *
+   * <p>The new-ish fields are read defensively ({@code path}/{@code hasNonNull}): the recordings
+   * cross a control-endpoint round-trip, and a handle must not blow up on a payload written by an
+   * older copy of this class that did not emit them.
+   */
   public List<RecordedRequest> recordedRequests() {
     JsonNode array = control("GET");
     List<RecordedRequest> requests = new ArrayList<>();
@@ -152,6 +161,8 @@ public final class MockService implements AutoCloseable {
           new RecordedRequest(
               node.get("method").asText(),
               node.get("path").asText(),
+              node.hasNonNull("query") ? node.get("query").asText() : null,
+              node.path("status").asInt(),
               Instant.parse(node.get("at").asText()),
               headers));
     }
@@ -173,32 +184,46 @@ public final class MockService implements AutoCloseable {
 
   // --- server side ---------------------------------------------------------------------------
 
+  /**
+   * Answer one request and record it. The stub is resolved <b>before</b> anything is written, so
+   * the recording can carry the status this side actually answered with — a stub's, or 404 for a
+   * route no stub matched. Appending before the bytes go out keeps the recording visible to a
+   * consumer that reacts the moment its response completes.
+   */
   private void handle(HttpExchange exchange) throws IOException {
-    String path = exchange.getRequestURI().getPath();
+    URI uri = exchange.getRequestURI();
+    String path = uri.getPath();
     if (path.startsWith("/__mock")) {
       handleControl(exchange, path);
       return;
     }
+    String method = exchange.getRequestMethod();
+    StubbedResponse stub;
+    synchronized (stubs) {
+      stub = stubs.get(routeKey(method, path));
+    }
+    int status = stub != null ? stub.status() : 404;
+    byte[] body =
+        stub != null
+            ? stub.body()
+            : MAPPER.writeValueAsBytes(
+                Map.of("error", "mock of " + name + " has no stub for this route"));
+
     Map<String, String> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     exchange.getRequestHeaders().forEach((header, values) -> headers.put(header, values.getFirst()));
     recorded.add(
-        new RecordedRequest(exchange.getRequestMethod(), path, Instant.now(), Map.copyOf(headers)));
+        new RecordedRequest(
+            method, path, uri.getRawQuery(), status, Instant.now(), Map.copyOf(headers)));
 
-    StubbedResponse stub;
-    synchronized (stubs) {
-      stub = stubs.get(routeKey(exchange.getRequestMethod(), path));
-    }
-    if (stub != null) {
-      respondJson(exchange, stub.status(), stub.body());
-    } else {
-      respondJson(
-          exchange,
-          404,
-          MAPPER.writeValueAsBytes(
-              Map.of("error", "mock of " + name + " has no stub for this route")));
-    }
+    respondJson(exchange, status, body);
   }
 
+  /**
+   * The control endpoint: {@code GET} serves the recordings as {@code [{method, path, query?,
+   * status, at, headers}, …]} — {@code query} is left out entirely for a request that carried
+   * none, which is what {@link #recordedRequests()} reads back as {@code null} — and {@code
+   * DELETE} clears them.
+   */
   private void handleControl(HttpExchange exchange, String path) throws IOException {
     if (!CONTROL_PATH.equals(path)) {
       exchange.sendResponseHeaders(404, -1);
@@ -211,6 +236,10 @@ public final class MockService implements AutoCloseable {
           Map<String, Object> node = new LinkedHashMap<>();
           node.put("method", request.method());
           node.put("path", request.path());
+          if (request.query() != null) {
+            node.put("query", request.query());
+          }
+          node.put("status", request.status());
           node.put("at", request.at().toString());
           node.put("headers", request.headers());
           out.add(node);
@@ -259,9 +288,24 @@ public final class MockService implements AutoCloseable {
     return PORT_PROPERTY_PREFIX + name + ".port";
   }
 
-  /** One request the mock answered: method, path, arrival time, first-value headers. */
+  /**
+   * One request the mock answered: method, path, query string, answered status, arrival time,
+   * first-value headers.
+   *
+   * <p>{@code query} is the <b>raw</b> query — recorded verbatim, never decoded and never parsed
+   * — and is {@code null} when the request URI carried none; {@code path} stays query-free.
+   * {@code status} is what this side actually answered: the matched stub's status, or 404 for a
+   * route no stub matched. Both are what lets a recording alone say <i>which</i> answer the
+   * consumer acted on — a diagram generated from recordings labels its edges with the status
+   * ({@code "-> 401"}), which no amount of method and path can supply.
+   */
   public record RecordedRequest(
-      String method, String path, Instant at, Map<String, String> headers) {}
+      String method,
+      String path,
+      String query,
+      int status,
+      Instant at,
+      Map<String, String> headers) {}
 
   private record StubbedResponse(int status, byte[] body) {}
 }
