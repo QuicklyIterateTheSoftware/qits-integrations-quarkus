@@ -1,6 +1,7 @@
-# qits-integrations-quarkus
+# qits-integrations-quarkus-javalib
 
-Quarkus glue every qits service needs and no service owns. Five modules today:
+Quarkus glue every qits service needs and no service owns. The reactor is
+`eu.wohlben.qits:qits-integrations-quarkus`, with five modules today:
 
 | Module | Coordinates | What it is |
 | --- | --- | --- |
@@ -366,15 +367,18 @@ the vocabulary, the claim checks and the gate.
 
 ## Adoption
 
-The same shape qits-ci uses for `libs/qits-eventstream`: a nested submodule the
-consuming reactor builds in place. From the consuming service's repo root:
+The same shape qits-ci-service uses for
+`components/qits-eventstream/qits-eventstream-javalib`: a nested submodule the
+consuming reactor builds in place. The submodule takes the repository's name;
+the checkout directory keeps the short one, because it is also the reactor
+module path. From the consuming service's repo root:
 
 ```sh
-git submodule add --name qits-integrations-quarkus \
-  https://github.com/QuicklyIterateTheSoftware/qits-integrations-quarkus.git \
+git submodule add --name qits-integrations-quarkus-javalib \
+  https://github.com/QuicklyIterateTheSoftware/qits-integrations-quarkus-javalib.git \
   qits-integrations-quarkus
-git config -f .gitmodules submodule.qits-integrations-quarkus.ignore all
-git config -f .gitmodules submodule.qits-integrations-quarkus.update merge
+git config -f .gitmodules submodule.qits-integrations-quarkus-javalib.ignore all
+git config -f .gitmodules submodule.qits-integrations-quarkus-javalib.update merge
 git submodule set-branch --branch main qits-integrations-quarkus
 ```
 
@@ -604,7 +608,8 @@ every client-supplied `X-Qits-*` header at the outer door, so an outside caller 
 tier. A caller building requests by hand (`java.net.http.HttpClient`) stamps the same header itself
 — the snippet is in `EnvironmentHeader`'s javadoc.
 
-**The same property is stamped onto every published event** by `libs/qits-eventstream`
+**The same property is stamped onto every published event** by
+`components/qits-eventstream/qits-eventstream-javalib`
 (`EventEnvelope.environment`, same `platform` fallback), whose extraction rule forbids importing
 `EnvironmentHeader` — the string `qits.environment` is deliberately spelled in both repositories,
 so grep both on a rename. `CallerEnvironment` follows `CausationScope`'s thread discipline whole:
