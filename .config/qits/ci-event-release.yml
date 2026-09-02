@@ -42,3 +42,25 @@ steps:
       fi
       ./mvnw -B -ntp deploy -DskipTests \
         -DaltDeploymentRepository="qits::default::$QITS_MAVEN_REGISTRY_URL"
+      # THE SBOM IS THE ARTIFACT'S RESOLVED DEPENDENCY TREE, one per declared module, and it goes up
+      # in this step — after the deploy, before the run goes green. qits-ci announces
+      # `SoftwareRelease` only for a green run, so an SBOM published here can never be missing for a
+      # version somebody was told about. A failed PUT fails the release ON PURPOSE.
+      #
+      # ONE makeBom PER MODULE, because the bill of materials is per artifact and a reactor-wide run
+      # would answer for the parent pom instead. The module DIRECTORIES and the artifactIds are the
+      # same five strings in this repository, which is what lets one list drive both `-pl` and the
+      # coordinate — check both if a module is ever renamed on one side only.
+      #
+      # The plugin resolves from the same repositories mvnw already resolves through; no second
+      # channel, and no address spelled here.
+      sbom_base="${QITS_MAVEN_REGISTRY_URL%%/artifacts/*}/artifacts/sboms"
+      for module in qits-auth-core qits-arch-rules qits-db-core \
+                    qits-environment-core qits-service-mock; do
+        ./mvnw -B -ntp -DskipTests -pl "$module" \
+          org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom \
+          -DoutputFormat=json -DoutputName=sbom -DschemaVersion=1.6
+        curl -fsS -X PUT -H 'Content-Type: application/vnd.cyclonedx+json' \
+          --data-binary "@$module/target/sbom.json" \
+          "$sbom_base/maven/eu.wohlben.qits:$module/-/$version"
+      done
